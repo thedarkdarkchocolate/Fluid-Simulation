@@ -1,0 +1,13 @@
+{
+    "version": 1,
+    "revision": 0,
+    "rules": [
+        {
+            "primary-output": "Fluid_Simulation.dir\\Release\\glad.obj",
+            "outputs": [
+                "Fluid_Simulation.dir\\Release\\"
+            ],
+            "requires": []
+        }
+    ]
+}

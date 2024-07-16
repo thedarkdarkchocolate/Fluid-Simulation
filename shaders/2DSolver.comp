@@ -1,0 +1,118 @@
+#version 430
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) buffer particlesLocations {
+    vec2 particles[];
+};
+
+layout(std430, binding = 1) readonly buffer neighboorsByCellID {
+    uint neighboors[];
+};
+
+layout(std430, binding = 2) readonly buffer startEndIndexes {
+    uvec2 indexes[];
+};
+
+layout(std430, binding = 5) buffer debugDensities {
+    vec2 densities[];
+};
+
+layout(std430, binding = 6) buffer debugCounter {
+    uvec2 counter;
+};
+
+uint currIndex;
+int currID;
+highp float density;
+highp float nearDensity;
+shared float diameter;
+
+uniform uint plCount;
+uniform vec4 border;
+uniform vec2 gridNum;
+uniform highp float dt;
+
+uniform float targetDensity;
+uniform float pressMult;
+uniform float nearPressMult;
+uniform float smoothingRadius;
+uniform float sigma;
+uniform float beta;
+
+void getID();
+void calcDensity();
+float smoothingQuadraticSpike(float q);
+float nearDensityKernel(float q);
+float smoothingQuadraticSpikeDerivative(float q);
+
+void main(){
+
+    currIndex = gl_GlobalInvocationID.x;
+
+    if (currIndex >= plCount) return;
+    
+    if (gl_LocalInvocationID.x == 0) diameter = smoothingRadius * 2;
+
+    barrier();
+
+    getID();
+
+    calcDensity();
+
+}
+// Notes from debugging
+// Looping over all particles yeilds different densities only for neighboors in the shader
+// cpu neighbooring calculation works fine 
+// also counting how many times q <= 1 to calculate density 
+// shows that only neighboors in gpu has a lower count of neighboors
+// and again cpu neighboors has exactly the same amount as looping all the particles
+void calcDensity() {
+
+    uvec2 bounds = indexes[currID];
+    densities[currIndex] = vec2(0);
+    counter = uvec2(0);
+
+    for(uint i = bounds.x; i < bounds.y; i++){
+        highp float dist = distance(particles[currIndex], particles[neighboors[i]]); 
+
+        float q = dist/smoothingRadius;
+
+        if (q > 1) continue;
+
+        densities[currIndex].y += smoothingQuadraticSpike(q);
+        atomicAdd(counter.y, 1);
+    }
+
+    for(uint i = 0; i < plCount; i++){
+        highp float dist = distance(particles[currIndex], particles[i]); 
+
+        float q = dist/smoothingRadius;
+
+        if (q > 1) continue;
+
+        densities[currIndex].x += smoothingQuadraticSpike(q);
+        atomicAdd(counter.x, 1);
+
+    }
+
+
+}
+
+void getID(){
+    currID = int((gridNum.x * ceil((particles[currIndex].y - border.x)/diameter) - 1) + (ceil((particles[currIndex].x - border.z)/diameter) - 1));
+}
+
+
+
+float smoothingQuadraticSpike(float q){
+    return (1 - q) * (1 - q);
+}
+
+float nearDensityKernel(float q){
+    return (1 - q) * (1 - q) * (1 - q);
+}
+
+float smoothingQuadraticSpikeDerivative(float q){
+    return (1 - q);
+}
