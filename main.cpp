@@ -227,11 +227,9 @@ int main(){
         // if (changeSim)
             // solver->Solve(deltaTime);
         // else 
-            // solver->Solve(deltaTime, 1);
+        // solver->Solve(deltaTime, 1);
         solver->ComputeShaderSolve(deltaTime, solver2D, neghboorSearch, writingToBuffer, dispatchCompute);
             
-        // updateBuffers(particlesLocationBuffer);  
-       
         // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         
 
@@ -249,6 +247,7 @@ int main(){
         renderS.setFloat("smoothingRadius", solver->getSmoothingRadius());
         renderS.setIntArray("neighbooringIDs", solver->getNeighbooringOffesets(), 9);
         VAO.Bind();
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         VAO.Unbind();
         // --------------------------------------
@@ -361,21 +360,21 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
         solver->setSigma(sigma);
     }
 
-    if (ImGui::SliderFloat("Beta", &beta, 0.f, 4.f)){
+    if (ImGui::SliderFloat("Beta", &beta, 0.0000001f, 0.01f)){
         solver->setBeta(beta);
     }
 
 
     ImGui::Text("--------------------");
 
-    ImGui::SliderInt("Particles to spawn", &v, 0, 1000);
+    ImGui::SliderInt("Particles to spawn", &v, 0, 50000);
 
     if (ImGui::Button("Random Location Spawn"))
     {
         std::vector<glm::vec2> pl;
         pl.resize(v);
 
-        std::random_device rd;
+        std::random_device rd("1");
         std::uniform_int_distribution<int> distW(borderPixelCoords[0] + particleRadius, borderPixelCoords[1] - particleRadius);
         std::uniform_int_distribution<int> distH(borderPixelCoords[2] + particleRadius, borderPixelCoords[3] - particleRadius);
 

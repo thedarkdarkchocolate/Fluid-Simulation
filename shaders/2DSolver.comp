@@ -14,6 +14,18 @@ layout(std430, binding = 2) readonly buffer startEndIndexes {
     uvec2 indexes[];
 };
 
+layout(std430, binding = 3) buffer particlesVelocities {
+    vec2 velocities[];
+};
+
+layout(std430, binding = 8) buffer particlesPrevVelocities {
+    vec2 velocitiesPrev[];
+};
+
+layout(std430, binding = 4) buffer particlesPrevPos {
+    vec2 particlesPrev[];
+};
+
 layout(std430, binding = 5) buffer debugDensities {
     vec2 densities[];
 };
@@ -22,26 +34,49 @@ layout(std430, binding = 6) buffer debugCounter {
     uvec2 counter;
 };
 
+layout(std430, binding = 7) buffer debugID {
+    int ID[];
+};
+
+layout(std430, binding = 9) buffer debugPressure {
+    vec4 pressure[];
+};
+
+layout(std430, binding = 10) buffer debugLocks {
+    int locks[];
+};
+
+layout(std430, binding = 11) buffer spatialIndicesBuffer {
+    uint spatialIndices[];
+};
+
 uint currIndex;
 int currID;
 highp float density;
 highp float nearDensity;
-shared float diameter;
+highp float P;
+highp float Pnear;
+vec2 currParticle;
 
 uniform uint plCount;
 uniform vec4 border;
-uniform vec2 gridNum;
-uniform highp float dt;
+uniform ivec2 gridNum;
+uniform float dt;
 
 uniform float targetDensity;
 uniform float pressMult;
 uniform float nearPressMult;
 uniform float smoothingRadius;
+uniform float gravity;
 uniform float sigma;
 uniform float beta;
 
 void getID();
 void calcDensity();
+void applyPressure();
+void applyPressureAll();
+void applyVelocities();
+void borderResolution();
 float smoothingQuadraticSpike(float q);
 float nearDensityKernel(float q);
 float smoothingQuadraticSpikeDerivative(float q);
@@ -52,7 +87,8 @@ void main(){
 
     if (currIndex >= plCount) return;
     
-    if (gl_LocalInvocationID.x == 0) diameter = smoothingRadius * 2;
+    particlesPrev[currIndex] = particles[currIndex];
+    velocitiesPrev[currIndex] = velocities[currIndex];
 
     barrier();
 
@@ -60,7 +96,24 @@ void main(){
 
     calcDensity();
 
+    barrier();
+
+    // if(currID >= 0)
+        applyPressure();
+    // else
+        // applyPressureAll();
+
+    barrier();
+
+    applyVelocities();
+
+    barrier();
+
+    borderResolution();   
+
 }
+
+
 // Notes from debugging
 // Looping over all particles yeilds different densities only for neighboors in the shader
 // cpu neighbooring calculation works fine 
@@ -68,42 +121,203 @@ void main(){
 // shows that only neighboors in gpu has a lower count of neighboors
 // and again cpu neighboors has exactly the same amount as looping all the particles
 void calcDensity() {
-
-    uvec2 bounds = indexes[currID];
+    
     densities[currIndex] = vec2(0);
     counter = uvec2(0);
+    if (currID >= 0){
 
-    for(uint i = bounds.x; i < bounds.y; i++){
-        highp float dist = distance(particles[currIndex], particles[neighboors[i]]); 
+        uvec2 bounds = indexes[currID];
+        for(uint i = bounds.x; i < bounds.y; i++){
+            highp float dist = distance(particles[currIndex], particles[neighboors[i]]); 
 
-        float q = dist/smoothingRadius;
+            float q = dist/smoothingRadius;
 
-        if (q > 1) continue;
+            if (q > 1) continue;
 
-        densities[currIndex].y += smoothingQuadraticSpike(q);
-        atomicAdd(counter.y, 1);
-    }
-
-    for(uint i = 0; i < plCount; i++){
-        highp float dist = distance(particles[currIndex], particles[i]); 
-
-        float q = dist/smoothingRadius;
-
-        if (q > 1) continue;
-
-        densities[currIndex].x += smoothingQuadraticSpike(q);
-        atomicAdd(counter.x, 1);
+            // densities[currIndex].x += smoothingQuadraticSpike(q);
+            // densities[currIndex].y += nearDensityKernel(q);
+            density += smoothingQuadraticSpike(q);
+            nearDensity += nearDensityKernel(q);
+            // atomicAdd(counter.y, 1);
+        }
 
     }
+    else
+        for(uint i = 0; i < plCount; i++){
+            highp float dist = distance(particles[currIndex], particles[i]); 
 
+            float q = dist/smoothingRadius;
+
+            if (q > 1) continue;
+
+            // densities[currIndex].x += smoothingQuadraticSpike(q);
+            // densities[currIndex].y += nearDensityKernel(q);
+            density += smoothingQuadraticSpike(q);
+            nearDensity += nearDensityKernel(q);
+            // atomicAdd(counter.y, 1);
+            // atomicAdd(counter.x, 1);
+
+        }
+
+    
+    // Pressure 
+    P = pressMult * (density - targetDensity);
+    // Near Pressure
+    Pnear =  nearPressMult * nearDensity;
 
 }
+
+void applyPressure() {
+    if (currID < 0) return;
+
+    vec2 dx = vec2(0);
+    vec2 du = vec2(0);
+    
+    uvec2 bounds = indexes[currID];
+    
+    for (uint i = bounds.x; i < bounds.y; i++){
+
+        vec2 neighboor = particlesPrev[neighboors[i]];
+
+        float dist = distance(particlesPrev[currIndex], neighboor);
+        vec2 unit_R = normalize(particlesPrev[currIndex] - neighboor);
+
+        float q = dist/smoothingRadius;
+
+        if ( q > 1 || unit_R == vec2(0)) continue;
+
+        vec2 D = vec2((P * smoothingQuadraticSpikeDerivative(q) + Pnear * smoothingQuadraticSpike(q)) * dt * dt) * unit_R;
+
+        // Max Force
+        float maxForce = 0.1 * smoothingRadius / dt; // Adjust this value as needed
+        D = clamp(D, -maxForce, maxForce);
+        
+        atomicAdd(counter.x, 1);
+        // Velocity difference
+        vec2 u = unit_R * (velocitiesPrev[currIndex] - velocitiesPrev[neighboors[i]]);
+
+        if (u != vec2(0)){
+            vec2 I = unit_R * smoothingQuadraticSpikeDerivative(q) * (sigma * u + beta * u * u) * dt;
+            du += I;
+            
+            // velocities[neighboors[i]] += I/2.f;
+
+        }
+
+        // Acquire lock for neighborIndex
+        // while (atomicExchange(locks[neighboors[i]], 1) == 1) {
+            // Busy-wait until lock is acquired
+        // }
+        // if (dist < 1){
+        //     particles[currIndex] += vec2(1, 1);
+        //     particles[neighboors[i]] -= vec2(1, 1);
+        // }
+        // Release lock for neighborIndex
+        // atomicExchange(locks[neighboors[i]], 0);
+
+        dx += D;
+    }
+
+    barrier();
+
+    pressure[currIndex].xy = dx;
+
+    particles[currIndex] += dx;
+    velocities[currIndex] -= du;
+
+}
+
+void applyPressureAll(){
+
+    if (currID < 0) return;
+
+    vec2 dx = vec2(0);
+    vec2 du = vec2(0);
+
+    for (uint i = 0; i < plCount; i++){
+
+        vec2 neighboor = particlesPrev[i];
+
+        float dist = distance(particlesPrev[currIndex], neighboor);
+        vec2 unit_R = normalize(particlesPrev[currIndex] - neighboor);
+
+        float q = dist/smoothingRadius;
+
+        if ( q > 1 || unit_R == vec2(0)) continue;
+
+        vec2 D = vec2((P * smoothingQuadraticSpikeDerivative(q) + Pnear * smoothingQuadraticSpike(q)) * dt * dt) * unit_R;
+        atomicAdd(counter.y, 1);
+        // Velocity difference
+        vec2 u = unit_R * (velocitiesPrev[currIndex] - velocitiesPrev[i]);
+
+        if (u != vec2(0)){
+            vec2 I =  unit_R * smoothingQuadraticSpikeDerivative(q) * (sigma * u + beta * u * u) * dt;
+            du += I/2;
+            
+            velocities[currIndex] -= I/2.f;
+            velocities[i] += I/2.f;
+        
+        }   
+
+        // Acquire lock for neighborIndex
+        // while (atomicExchange(locks[neighboors[i]], 1) == 1) {
+        //     // Busy-wait until lock is acquired
+        // }
+
+        particles[i] -= D/2.f;
+
+        // // Release lock for neighborIndex
+        // atomicExchange(locks[neighboors[i]], 0);
+
+
+        dx += D/2.f;
+    }
+
+    pressure[currIndex].zw = dx;
+
+    particles[currIndex] += dx;
+}
+
+void applyVelocities(){
+    velocities[currIndex] += vec2(0, gravity) * dt + particles[currIndex] - particlesPrev[currIndex];
+    particles[currIndex] += velocities[currIndex];
+}
+
+void borderResolution(){
+
+    float collisionDamping = 0.6;
+    float borderFriction = 0;
+
+    if(particles[currIndex].x < border.x){
+        particles[currIndex].x = border.x + 1;
+        velocities[currIndex].x *= -collisionDamping;
+        
+    }
+    if (particles[currIndex].x > border.y){
+        particles[currIndex].x = border.y - 1;
+        velocities[currIndex].x *= -collisionDamping;
+        
+    }
+
+    if(particles[currIndex].y < border.z){
+        particles[currIndex].y = border.z + 1;
+        velocities[currIndex].y *= -collisionDamping;
+        
+    }
+    if (particles[currIndex].y > border.w){
+        particles[currIndex].y = border.w - 1;
+        velocities[currIndex].y *= -collisionDamping;
+        
+    }
+}
+
+
 
 void getID(){
-    currID = int((gridNum.x * ceil((particles[currIndex].y - border.x)/diameter) - 1) + (ceil((particles[currIndex].x - border.z)/diameter) - 1));
+    // For debugging
+    ID[currIndex] = int((gridNum.x * ceil((particles[currIndex].y - border.z)/smoothingRadius) - 1) + (ceil((particles[currIndex].x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
+    currID = int((gridNum.x * ceil((particles[currIndex].y - border.z)/smoothingRadius) - 1) + (ceil((particles[currIndex].x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
 }
-
-
 
 float smoothingQuadraticSpike(float q){
     return (1 - q) * (1 - q);

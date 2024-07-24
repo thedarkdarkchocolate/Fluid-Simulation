@@ -12,6 +12,8 @@ uniform int particlesIndex;
 uniform int neighbooringIDs[9];
 uniform vec2 gridNum;
 
+int currID;
+uint currIndex;
 
 layout(std430, binding = 0) readonly buffer particlesLocations {
     vec2 particles[];
@@ -27,9 +29,11 @@ layout(std430, binding = 2) readonly buffer neighbooringParticlesIndex {
     uvec2 startEndIndexes[];
 };
 
-int getID(int index){
-    return int(gridNum.x * (ceil((particles[index].y - border.z)/(smoothingRadius * 2)) - 1) + (ceil((particles[index].x - border.x)/(smoothingRadius * 2)) - 1));
+    
+void getID(){
+    currID = int((gridNum.x * ceil((particles[currIndex].y - border.z)/smoothingRadius) - 1) + (ceil((particles[currIndex].x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
 }
+
 
 
 void main () {
@@ -97,7 +101,7 @@ void main () {
         
     if (drawGrid)
         if (gl_FragCoord.x >= border.x && gl_FragCoord.x <= border.y && gl_FragCoord.y >= border.z && gl_FragCoord.y <= border.w) 
-            if (mod(gl_FragCoord.x - border.x , smoothingRadius * 2.0) < 1.0 || mod(gl_FragCoord.y - border.z, smoothingRadius * 2.0) < 1.0)
+            if (mod(gl_FragCoord.x - border.x , smoothingRadius) < 1.0 || mod(gl_FragCoord.y - border.z, smoothingRadius) < 1.0)
                 gl_FragColor = vec4(0.31);
     
     if (isPressed && distance(gl_FragCoord.xy, densityCenter) <= smoothingRadius + 1 && distance(gl_FragCoord.xy, densityCenter) >= smoothingRadius - 1){

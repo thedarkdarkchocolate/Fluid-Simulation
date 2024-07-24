@@ -131,10 +131,14 @@ class ComputeShader
         glUniform2fv(getUniformLocation(ID, name), 1, &vec2[0]);
     }
 
-
     void setInt(const std::string &name, int value) const
     { 
         glUniform1i(getUniformLocation(ID, name), value); 
+    }
+
+    void setVec2iv(const std::string &name, glm::ivec2 ivec2) const
+    { 
+        glUniform2iv(getUniformLocation(ID, name), 1, &ivec2[0]); 
     }
 
     void setUint(const std::string &name, int value) const

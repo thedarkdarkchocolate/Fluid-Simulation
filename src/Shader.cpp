@@ -3,7 +3,6 @@
 #include "Shader.hpp"
 
 
-// Constructor for Vertex and Fragment Shader
 Shader::Shader(const char* vertexPath, const char* fragmentPath){
 
 
@@ -101,78 +100,6 @@ Shader::Shader(const char* vertexPath, const char* fragmentPath){
 }
 
 
-// Constructor for Compute Shaders
-Shader::Shader(const char* computePath){
-
-
-    std::string computeCode;
-    std::ifstream cShaderFile;
-
-    cShaderFile.exceptions (std::ifstream::failbit | std::ifstream::badbit);
-
-    try{
-        
-        // Code for reading shaders from another file 
-        // Opening files 
-        cShaderFile.open(computePath);
-
-        // Declaring streams
-        std::stringstream cShaderStream;
-
-        // read file's buffer content into streams
-        cShaderStream << cShaderFile.rdbuf();
-
-        // Closing opened files
-        cShaderFile.close();
-
-        // Convert stream into string
-        computeCode  = cShaderStream.str();
-
-    }catch(std::ifstream::failure e)
-    {
-        std::cout << "ERROR::SHADER::FILE_NOT_SUCCESFULLY_READ" << std::endl;
-    }
-
-
-    const char * cShaderCode = computeCode.c_str();
-
-
-    // Compile Shader
-    unsigned compute;
-    int success;
-    char infoLog[512];
-
-    // Compute Shader
-    compute = glCreateShader(GL_COMPUTE_SHADER);
-    glShaderSource(compute, 1, &cShaderCode, NULL);
-    glCompileShader(compute);   
-    
-    glGetShaderiv(compute, GL_COMPILE_STATUS, &success);
-    
-    if(!success){
-
-        glGetShaderInfoLog(compute, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::COMPUTE::COMPILATION_FAILED\n" << infoLog << std::endl;
-    }
-    
-    // Creating program
-    ID = glCreateProgram();
-    glAttachShader(ID, compute);
-    glLinkProgram(ID);
-
-    // Program linking error check
-    glGetProgramiv(ID, GL_LINK_STATUS, &success);
-
-    if(!success){
-
-        glGetProgramInfoLog(ID, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
-    }
-    
-    glDeleteShader(compute);
-
-
-}
 
 Shader::~Shader()
 {

@@ -25,14 +25,17 @@ class Solver {
 
     // Buffers for compute shader
     ShaderBuffer<glm::vec2> particlesLocationBuffer;
-    ShaderBuffer<unsigned int> bufferIndexesByCellID;
+    ShaderBuffer<glm::uint32> bufferIndexesByCellID;
     ShaderBuffer<glm::u32vec2> bufferStartEndIndexes;
     ShaderBuffer<glm::vec2> bufferVelocities;
     ShaderBuffer<glm::vec2> bufferPrevVelocities;
     ShaderBuffer<glm::vec2> bufferPrevPositions;
     ShaderBuffer<glm::vec2> bufferDensities;
-    ShaderBuffer<glm::ivec2> debugBufferCounter;
-    ShaderBuffer<unsigned int> atomicLocksBuffer;
+    ShaderBuffer<glm::uvec2> debugBufferCounter;
+    ShaderBuffer<glm::vec4> debugPressure;
+    ShaderBuffer<int> debugID;
+    ShaderBuffer<int> spatialLookupBuffer;
+    ShaderBuffer<int> spatialIndexessBuffer;
     
     // Holding previous iteration locations to calculate the velocity
     std::vector<glm::vec2> particlesPrevLocations;
@@ -68,7 +71,7 @@ class Solver {
     glm::vec2 m_borderH;
 
     // Holding the total number of cells for X and Y
-    glm::i16vec2 gridNum;
+    glm::ivec2 gridNum;
 
     // Particle "interference" radius 
     float m_smoothingRadius;
@@ -105,8 +108,11 @@ public:
       bufferPrevPositions(4),
       bufferDensities(5),
       debugBufferCounter(6),
-      atomicLocksBuffer(7),
-      bufferPrevVelocities(8)
+      debugID(7),
+      bufferPrevVelocities(8),
+      debugPressure(9),
+      spatialLookupBuffer(10),
+      spatialIndexessBuffer(11)
 
     {
         particlesLocations = {};
@@ -122,9 +128,9 @@ public:
         pressureMultiplier = pressureMult;
         pressureNearMultiplier = pressureNearMulti;
         targetDensity = 20;
-        gravity = {0, -1.f};
+        gravity = {0, -20.f};
         sigma = 0.01f;
-        beta = 0.05f;
+        beta = 0.0001f;
         diameter = 2 * m_smoothingRadius;
 
         setBorder(border);
@@ -151,78 +157,88 @@ public:
     void ComputeShaderSolve(float dt, ComputeShader& compute, float& neighboorsTiming, float& writeBuffersTiming, float& computeTiming){
 
         dt = 0.03;
-        if (!plCount) return;
-
-
-        // // Retriving new location to calculate neighboors
+        if(plCount == 0) return;
+        // Ensure GPU writes to particlesLocationBuffer are visible to the CPU
+        // glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+        
+        // Retrieve new locations from GPU to calculate neighbors on CPU
         particlesLocationBuffer.getData(particlesLocations, plCount);
 
+        // Ensure CPU reads are complete
+        // glMemoryBarrier(GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
 
         auto start = std::chrono::high_resolution_clock::now();
-        // Calculate Neighboors for compute
+        
+        // Calculate Neighbors for compute on CPU
         computeShadersCalcuateNeighboors();
 
         auto end = std::chrono::high_resolution_clock::now();
         neighboorsTiming += std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-
-        // Setting buffers with new neighboors
-        bufferIndexesByCellID.setData(indexesByCellID.data(), indexesByCellID.size() * sizeof(unsigned int));
+        // Set buffers with new neighbors
+        // glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
+        
+        bufferIndexesByCellID.setData(indexesByCellID.data(), indexesByCellID.size() * sizeof(glm::uint32));
         bufferStartEndIndexes.setData(startEndIndexes.data(), startEndIndexes.size() * sizeof(glm::uvec2));
 
+        // Ensure all CPU writes are visible to GPU
+        // glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
-        
+            
         // Set Uniforms
         compute.useShader();
+        compute.setUint("plCount", plCount);
         compute.setVec4fv("border", {m_borderW, m_borderH});
+        compute.setVec2iv("gridNum", gridNum);
+        compute.setFloat("dt", dt);
         compute.setFloat("targetDensity", targetDensity);
-        compute.setVec2fv("gridNum", gridNum);
-        compute.setFloat("pressureMultiplier", pressureMultiplier);
-        compute.setFloat("pressureNearMultiplier", pressureNearMultiplier);
+        compute.setFloat("pressMult", pressureMultiplier);
+        compute.setFloat("nearPressMult", pressureNearMultiplier);
         compute.setFloat("smoothingRadius", m_smoothingRadius);
         compute.setFloat("gravity", gravity.y);
-        compute.setUint("plCount", plCount);
         compute.setFloat("sigma", sigma);
         compute.setFloat("beta", beta);
-        compute.setFloat("dt", dt);
         
-        // {
+        {
 
-        //     GLuint query;
-        //     glGenQueries(1, &query);
+            GLuint query;
+            glGenQueries(1, &query);
 
-        //     // Begin the query
-        //     glBeginQuery(GL_TIME_ELAPSED, query);
-
-
-        //     // call glDispatchCompute here
-        //     glDispatchCompute(plCount, 1, 1);
+            // Begin the query
+            glBeginQuery(GL_TIME_ELAPSED, query);
 
 
-        //     // End the query
-        //     glEndQuery(GL_TIME_ELAPSED);
+            // call glDispatchCompute here
+            glDispatchCompute(plCount, 1, 1);
 
-        //     // Wait until the results are available (optional)
-        //     GLint available = 0;
-        //     while (!available) {
-        //         glGetQueryObjectiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
-        //     }
 
-        //     // Get the query result
-        //     GLuint64 elapsed_time = 0;
-        //     glGetQueryObjectui64v(query, GL_QUERY_RESULT, &elapsed_time);
+            // End the query
+            glEndQuery(GL_TIME_ELAPSED);
 
-        //     double elapsed_time_ms = static_cast<double>(elapsed_time) / 1e6;
+            // Wait until the results are available (optional)
+            GLint available = 0;
+            while (!available) {
+                glGetQueryObjectiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
+            }
 
-        //     // Print the elapsed time in milliseconds
-        //     printf("Elapsed time: %.2f ms\n", elapsed_time_ms);
+            // Get the query result
+            GLuint64 elapsed_time = 0;
+            glGetQueryObjectui64v(query, GL_QUERY_RESULT, &elapsed_time);
 
-        //     // Delete the query object when done
-        //     glDeleteQueries(1, &query);
-        // }
+            double elapsed_time_ms = static_cast<double>(elapsed_time) / 1e6;
+
+            // Print the elapsed time in milliseconds
+            printf("Elapsed time: %.2f ms\n", elapsed_time_ms);
+
+            // Delete the query object when done
+            glDeleteQueries(1, &query);
+        }
         // Call compute Shader
-        glDispatchCompute(plCount, 1, 1);
-        compareDensities();
+        // glDispatchCompute(plCount, 1, 1);
+        // compareIDs();
+        // compareDensities();
+        // compareDensityRelaxations();
+        // glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
         // glDispatchCompute(plCount/2, plCount/2, 1);
         // glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
@@ -231,6 +247,57 @@ public:
 
     
         // End of compute
+    }
+
+    void compareDensityRelaxations(){
+        int count = 0;
+        std::vector<glm::vec4> GPUpressure(plCount, glm::vec4(-1));
+        std::vector<glm::uvec2> counter (1, glm::uvec2(0));
+        debugBufferCounter.getData(counter, 1);
+
+        debugPressure.getData(GPUpressure, plCount);
+        glMemoryBarrier(GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
+
+        for(int i = 0; i < plCount; i++){
+
+           if(GPUpressure[i].x - GPUpressure[i].z > 0.001 || GPUpressure[i].y - GPUpressure[i].w > 0.001){
+                std::cout << "Index: " << i << "  ALL: (" << GPUpressure[i].z << ", " << GPUpressure[i].w << ") "
+                    << ", NEIGH: (" << GPUpressure[i].x << ", " << GPUpressure[i].y << "), " << std::endl;
+                    count++;
+           }
+
+        }
+
+        std::cout << "\n----------------------" << std::endl;
+        std::cout << "ALL : " << counter[0].y << ", NEIGH: " << counter[0].x << std::endl;
+        std::cout << "Correct: " << plCount - count << ", False: " << count << std::endl;
+        std::cout << "----------------------" << std::endl;
+
+    }
+
+    void compareIDs(){
+
+        std::vector<int> gpuIDs(plCount, -1);
+        int count = 0;
+        
+        debugID.getData(gpuIDs, plCount);
+        glMemoryBarrier(GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
+        
+        for(int i = 0; i < plCount; i++){
+
+            if(getID(particlesLocations[i]) != gpuIDs[i]){
+                
+                std::cout << "CPU ID: " << getID(particlesLocations[i])
+                    << ", GPU ID: " << gpuIDs[i] << std::endl; 
+                    count++;
+            }
+            // assert(gpuIDs[i] >= 0);
+
+        }
+
+        std::cout << "\n----------------------" << std::endl;
+        std::cout << "Correct: " << plCount - count << ", False: " << count << std::endl;
+        std::cout << "----------------------" << std::endl;
     }
 
     void calculateDensitiesCPU(std::vector<glm::vec2>& densities){
@@ -279,11 +346,14 @@ public:
     void compareDensities(){
 
         std::vector<glm::vec2> tmp(plCount, glm::vec2(0));
-        std::vector<glm::ivec2> counter (1, glm::ivec2(0));        
+        std::vector<glm::uvec2> counter (1, glm::uvec2(0));        
         std::vector<glm::vec2> CPUdensities (plCount, glm::vec2(0));        
 
         bufferDensities.getData(tmp, plCount);
         debugBufferCounter.getData(counter, 1);
+
+        // Ensure CPU reads are complete before proceeding
+        glMemoryBarrier(GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
 
         calculateDensitiesCPU(CPUdensities);
 
@@ -291,17 +361,22 @@ public:
                     << " ALL_D: " << counter[0].x << " , NEIGH_D: " << counter[0].y << std::endl; 
 
         std::cout << "----------------------" << std::endl;
+        int count = 0;
 
-        for (int i = 0; i < plCount; i++)
-            // if (abs(tmp[i].x - tmp[i].y) > 0.001){
-            //     std::cout << "DENSITIES_GPU DIFFER INDEX: " << i 
-            //         << ", ALL_D: " << tmp[i].x << " , NEIGH_D: " << tmp[i].y << std::endl; 
-            // }
-            if (abs(tmp[i].x - CPUdensities[i].x) > 0.001 || abs(tmp[i].y - CPUdensities[i].y) > 0.001){
-                std::cout << "DENSITIES INDEX: " << i 
-                    << ", ALL_GPU_D: " << tmp[i].x << " , ALL_CPU_D: " << CPUdensities[i].x <<
-                    "   -------   N_GPU: " << tmp[i].y << ", NEIGH_CPU_D: " << CPUdensities[i].y << std::endl; 
-            }
+        // for (int i = 0; i < plCount; i++){
+        //     // if (abs(tmp[i].x - tmp[i].y) > 0.001){
+        //     //     std::cout << "DENSITIES_GPU DIFFER INDEX: " << i 
+        //     //         << ", ALL_D: " << tmp[i].x << " , NEIGH_D: " << tmp[i].y << std::endl; 
+        //     // }
+        //     if (abs(tmp[i].x - CPUdensities[i].x) > 0.001 || abs(tmp[i].x - CPUdensities[i].y) > 0.001){
+        //         std::cout << "DENSITIES INDEX: " << i 
+        //             << ", ALL_GPU_D: " << tmp[i].x << " , ALL_CPU_D: " << CPUdensities[i].x <<
+        //             "   -------   N_GPU: " << tmp[i].x << ", NEIGH_CPU_D: " << CPUdensities[i].y << std::endl; 
+        //         count++;
+        //     }
+            
+        // }
+        std::cout << "Correct: " << plCount - count << ", False: " << count << std::endl;
     }
 
     void verifyNeighbooringArrays(){
@@ -566,6 +641,11 @@ public:
         }
         joinThreads(workCount);
 
+        for(int i = 0; i < plCount; i++)
+            if (particlesLocations[i].y < 0)
+                assert(false);
+
+        particlesLocationBuffer.setData(particlesLocations.data(), particlesLocations.size() * sizeof(glm::vec2));
 
     }
 
@@ -790,8 +870,8 @@ public:
     void calculateGrid(){
 
         
-        gridNum.x = std::ceil((m_borderW.y - m_borderW.x)/diameter);
-        gridNum.y = std::ceil((m_borderH.y - m_borderH.x)/diameter);
+        gridNum.x = std::ceil((m_borderW.y - m_borderW.x)/m_smoothingRadius);
+        gridNum.y = std::ceil((m_borderH.y - m_borderH.x)/m_smoothingRadius);
 
         neighbooringIDs[0] = 1;                   // right
         neighbooringIDs[1] = -1;                  // left
@@ -825,6 +905,8 @@ public:
         calculateGrid();
 
         cacheParticles();
+
+        computeShadersCalcuateNeighboors();
 
     }
 
@@ -912,18 +994,22 @@ public:
 
         initilizePrevPos();
         computeShadersCalcuateNeighboors();
-        std::vector<glm::vec2> initialVelocities(plCount, initialVelocity);
+        std::vector<glm::vec2> initialVelocities(plCount, {0, 0});
 
         bufferVelocities.setData(initialVelocities.data(), plCount * sizeof(glm::vec2));
         bufferPrevVelocities.setData(initialVelocities.data(), plCount * sizeof(glm::vec2));
         bufferPrevPositions.setData(IN_particlesLocations.data(), plCount * sizeof(glm::vec2));
         bufferDensities.setData(initialVelocities.data(), plCount * sizeof(glm::vec2));
+        debugPressure.setData(initialVelocities.data(), plCount * sizeof(glm::vec4));
+
 
         glm::ivec2 tmp {0, 0};
         debugBufferCounter.setData(&tmp, sizeof(glm::ivec2));
 
-        std::vector<unsigned int> b (plCount, 0);
-        atomicLocksBuffer.setData(b.data(), plCount * sizeof(unsigned int));
+        std::vector<int> b (plCount, 0);
+        spatialLookupBuffer.setData(b.data(), plCount * sizeof(int));
+        spatialIndexessBuffer.setData(b.data(), plCount * sizeof(int));
+        debugID.setData(b.data(), plCount * sizeof(int));
 
     }
 
@@ -1139,7 +1225,7 @@ public:
         // int col = (particleLocation.x < m_borderW.x) ? (std::ceil((particleLocation.x - m_borderW.x)/(m_smoothingRadius * 2)) - 1) : 0;
 
         // return row + col;
-        return gridNum.x * (std::ceil((particleLocation.y - m_borderH.x)/diameter) - 1) + (std::ceil((particleLocation.x - m_borderW.x)/diameter) - 1);
+        return gridNum.x * (std::ceil((particleLocation.y - m_borderH.x)/m_smoothingRadius) - 1) + (std::ceil((particleLocation.x - m_borderW.x)/m_smoothingRadius) - 1);
     }
 
     float* getDensityData() {
