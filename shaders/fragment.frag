@@ -21,7 +21,7 @@ layout(std430, binding = 0) readonly buffer particlesLocations {
 
 layout(std430, binding = 1) readonly buffer particlesByCellID {
     // This will hold all the particles indexes by id and a seperate array will hold the start and end indexes of every cell ID 
-    uint indexesByCellID[];
+    uint neighboors[];
 };
 
 layout(std430, binding = 2) readonly buffer neighbooringParticlesIndex {
@@ -31,22 +31,24 @@ layout(std430, binding = 2) readonly buffer neighbooringParticlesIndex {
 
     
 void getID(){
-    currID = int((gridNum.x * ceil((particles[currIndex].y - border.z)/smoothingRadius) - 1) + (ceil((particles[currIndex].x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
+    currID = int((gridNum.x * ceil((gl_FragCoord.y - border.z)/smoothingRadius) - 1) + (ceil((gl_FragCoord.x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
 }
 
 
 
 void main () {
     
-    // gl_FragColor += vec4((cos(gl_FragCoord.y/225 * 3.1415 - 3 + sin(gl_FragCoord.x/900 * 3.1415 * 4)) + 1)/2);
+    getID();
     
-    // ivec2 indexBounds = ivec2(startEndIndexes[currID]);
+    if (currID < 0) return;
+    
+    ivec2 indexBounds = ivec2(startEndIndexes[currID]);
 
-    // for(int i = indexBounds.x; i < indexBounds.y; i++){
+    for(int i = indexBounds.x; i < indexBounds.y; i++){
 
-    for (int i = 0; i < particles.length(); i++){
+    // for (int i = 0; i < particles.length(); i++){
 
-        float dist = distance(gl_FragCoord.xy, particles[i].xy);
+        float dist = distance(gl_FragCoord.xy, particles[neighboors[i]].xy);
 
         // Drawing solid particles
         if (dist <= 2) gl_FragColor = vec4(1.f);

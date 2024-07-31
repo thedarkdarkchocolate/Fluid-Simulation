@@ -22,6 +22,9 @@ class Solver {
     // Size in bytes of the vector holding all particle locations
     unsigned int plSize;
     unsigned int plCount;
+    // Spatial Lookup
+    std::vector<glm::ivec2> spatialLookUp;
+    std::vector<int> spatialOffsets;
 
     // Buffers for compute shader
     ShaderBuffer<glm::vec2> particlesLocationBuffer;
@@ -93,13 +96,17 @@ class Solver {
     float sigma;
     float beta;
 
+    // Attraction Force
+    float attraction;
+    bool isPressed;
+    glm::vec2 mousePos;
 
 public:
     
     Solver(){}
 
     // No particles constuctor
-    Solver(float border[4], float smoothingRadius = 100.f, glm::vec2 initVel = {0, 0}, float pressureMult = 42, float pressureNearMulti = 63)
+    Solver(float border[4], float smoothingRadius = 100.f, glm::vec2 initVel = {0, 0}, float pressureMult = 42, float pressureNearMulti = 63, float atrctForce = 43.f)
     : m_smoothingRadius {smoothingRadius},
       particlesLocationBuffer(0),
       bufferIndexesByCellID(1),
@@ -121,17 +128,21 @@ public:
         velocities = {};
         nearBorderParticlesIndex = {};
         springs = {};
+        spatialLookUp = {};
+        spatialOffsets = {};
         plSize = 0;
         plCount = 0;
 
         initialVelocity = initVel;        
         pressureMultiplier = pressureMult;
         pressureNearMultiplier = pressureNearMulti;
+        attraction = atrctForce;
         targetDensity = 20;
         gravity = {0, -20.f};
         sigma = 0.01f;
         beta = 0.0001f;
-        diameter = 2 * m_smoothingRadius;
+        isPressed = false;
+        mousePos = {0, 0};
 
         setBorder(border);
         calculateGrid();
@@ -141,18 +152,10 @@ public:
     }
 
 
-    void Solve(float timeStep, int i){
-       
-        parrallel(timeStep);
-
-        cacheParticles();
-
-    }
-
     void Solve(float timeStep){
-        SolveTimeStep(timeStep);
+        parrallel(timeStep);
+        cacheParticles();
     }
-
 
     void ComputeShaderSolve(float dt, ComputeShader& compute, float& neighboorsTiming, float& writeBuffersTiming, float& computeTiming){
 
@@ -198,43 +201,47 @@ public:
         compute.setFloat("gravity", gravity.y);
         compute.setFloat("sigma", sigma);
         compute.setFloat("beta", beta);
+        compute.setFloat("attraction", attraction);
+        compute.setBool("isClicked", isPressed);
+        compute.setVec2fv("mousePos", mousePos);
+
         
-        {
+        // {
 
-            GLuint query;
-            glGenQueries(1, &query);
+        //     GLuint query;
+        //     glGenQueries(1, &query);
 
-            // Begin the query
-            glBeginQuery(GL_TIME_ELAPSED, query);
-
-
-            // call glDispatchCompute here
-            glDispatchCompute(plCount, 1, 1);
+        //     // Begin the query
+        //     glBeginQuery(GL_TIME_ELAPSED, query);
 
 
-            // End the query
-            glEndQuery(GL_TIME_ELAPSED);
+        //     // call glDispatchCompute here
+        //     glDispatchCompute(plCount, 1, 1);
 
-            // Wait until the results are available (optional)
-            GLint available = 0;
-            while (!available) {
-                glGetQueryObjectiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
-            }
 
-            // Get the query result
-            GLuint64 elapsed_time = 0;
-            glGetQueryObjectui64v(query, GL_QUERY_RESULT, &elapsed_time);
+        //     // End the query
+        //     glEndQuery(GL_TIME_ELAPSED);
 
-            double elapsed_time_ms = static_cast<double>(elapsed_time) / 1e6;
+        //     // Wait until the results are available (optional)
+        //     GLint available = 0;
+        //     while (!available) {
+        //         glGetQueryObjectiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
+        //     }
 
-            // Print the elapsed time in milliseconds
-            printf("Elapsed time: %.2f ms\n", elapsed_time_ms);
+        //     // Get the query result
+        //     GLuint64 elapsed_time = 0;
+        //     glGetQueryObjectui64v(query, GL_QUERY_RESULT, &elapsed_time);
 
-            // Delete the query object when done
-            glDeleteQueries(1, &query);
-        }
+        //     double elapsed_time_ms = static_cast<double>(elapsed_time) / 1e6;
+
+        //     // Print the elapsed time in milliseconds
+        //     printf("Elapsed time: %.2f ms\n", elapsed_time_ms);
+
+        //     // Delete the query object when done
+        //     glDeleteQueries(1, &query);
+        // }
         // Call compute Shader
-        // glDispatchCompute(plCount, 1, 1);
+        glDispatchCompute(plCount, 1, 1);
         // compareIDs();
         // compareDensities();
         // compareDensityRelaxations();
@@ -398,191 +405,78 @@ public:
 
     }
 
-    void SolveTimeStep(float dt = 0.02f){
-        // dt = 0.1f;
-        if (!plCount) return;
 
-        const int workCount = (int)plCount > 100 ? plCount/totalThreads : 0;
-        // dt = 0.1;
-        // 1 APPLY GRAVITY
-        // 2 APPLY VISCOCITY
-        // 3 APPLY DOUBLE RELAXATION
-        // 4 RESOLVE COLISIONS
-        // 5 USE PREV POSITIONS TO COMPUTE NEXT VELOCITY
+    // -------------------------------------
+
+    // FUNCTIONS FOR SPATIAL HASHING
+
+    // -------------------------------------
+
+
+    void kappa(){
+
+        spatialLookUp.clear();
+        spatialOffsets.clear();
+        spatialLookUp.resize(plCount);
+        spatialOffsets.resize(plCount);
+
+        for(int i = 0; i < plCount; i++){
+
+            spatialLookUp[i] = {getCellKey(i), i};
+
+        }
+
+        std::sort(spatialLookUp.begin(), spatialLookUp.end(), &Solver::compareSpatialLookUp);
+
+        for(int i = 0; i < plCount; i++){
         
+            // if(i == 0) 
+            int key = spatialLookUp[i].x;
+            int prevKey = (i == 0 ? plCount + 1 : spatialLookUp[i - 1].x);
 
-        // APPLY GRAVITY
-        for (int i = 0; i < totalThreads && workCount; i++){
-            int start = i * workCount;
-            int end = (i == totalThreads - 1) ? plCount : workCount + start;
-            threads.emplace_back(&Solver::applyGravity, this, dt, start, end);
-        }
-        joinThreads(workCount);
-
-        // // APPLYING VISCOCITY
-        // for (int i = 0; i < totalThreads && workCount; i++){
-        //     int start = i * workCount;
-        //     int end = (i == totalThreads - 1) ? plCount : workCount + start;
-        //     threads.emplace_back(&Solver::viscocityImpulse, this, dt, start, end);
-        // }
-        // joinThreads(workCount);
-
-        // SAVE PREV POSITION AND ADVANCE TO PREDICTED POS 
-        for (int i = 0; i < totalThreads && workCount; i++){
-            int start = i * workCount;
-            int end = (i == totalThreads - 1) ? plCount : workCount + start;
-            threads.emplace_back(&Solver::advanceToPredictedPos, this, dt, start, end);
-        }
-        joinThreads(workCount);
-
-        cacheParticles();
-
-        // CALCULATE DENSITY AND NEAR DENSITY
-        for (int i = 0; i < totalThreads && workCount; i++){
-            int start = i * workCount;
-            int end = (i == totalThreads - 1) ? plCount : workCount + start;
-            threads.emplace_back(&Solver::computeNearALocalDensitiesParallel, this, start, end);
-        }
-        joinThreads(workCount);
-
-        // DOUBLE DENSITY RELAXATION 
-        for (int i = 0; i < totalThreads && workCount; i++){
-            int start = i * workCount;
-            int end = (i == totalThreads - 1) ? plCount : workCount + start;
-            threads.emplace_back(&Solver::doubleDensityRelaxation, this, dt, start, end);
-        }
-        joinThreads(workCount);
-        
-
-        // COMPUTE NEXT VELOCITY
-        for (int i = 0; i < totalThreads && workCount; i++){
-            int start = i * workCount;
-            int end = (i == totalThreads - 1) ? plCount : workCount + start;
-            threads.emplace_back(&Solver::computeNextVelocity, this, dt, start, end);
-        }
-        joinThreads(workCount);
-
-
-        // RESOLVE COLISIONS
-        for (int i = 0; i < totalThreads && workCount; i++){
-            int start = i * workCount;
-            int end = (i == totalThreads - 1) ? plCount : workCount + start;
-            threads.emplace_back(&Solver::borderResolutionParallel, this, start, end);
-        }
-        joinThreads(workCount);
-
-    }
-
-    void applyGravity(float dt, int start, int end){
-
-        for(int i = start; i < end; i++)
-            velocities[i] += gravity;
-
-    }
-
-    void advanceToPredictedPos(float dt, int start, int end){
-
-        for(int i = start; i < end; i++)
-        {
-            particlesPrevLocations[i] = particlesLocations[i];
-            particlesLocations[i] += velocities[i] * dt;
-        }
-    }
-
-    void viscocityImpulse(float dt, int start, int end){
-
-        for(int i = start; i < end; i++)
-        {
-            glm::vec2& currentP = particlesLocations[i];
-
-            // Neighboor indexes in particlesLocations
-            std::vector<int>& neighboorIndexes = getNeighboors(currentP);
-
-
-            for(int j = 0; j < neighboorIndexes.size(); j++)
-            {
-                float distance = glm::distance(currentP, particlesLocations[neighboorIndexes[j]]);
-                glm::vec2 unit_R = currentP - particlesLocations[neighboorIndexes[j]];
-                unit_R = unit_R / glm::length(unit_R);
-
-                float q = distance/m_smoothingRadius;
-
-                if ( q > 1 || (unit_R.x == 0 && unit_R.y == 0)) continue;
-
-                glm::vec2 u = unit_R * (velocities[i] - velocities[neighboorIndexes[j]]);
-
-                if (u.x > 0 && u.y > 0){
-                    glm::vec2 I =  unit_R * smoothingQuadraticSpikeDerivative(q) * (sigma * u + beta * u * u) * dt;
-                    
-                    velocities[i] -= I/2.f;
-                    velocities[neighboorIndexes[j]] += I/2.f;
-
-                }
-
+            if (key != prevKey){
+                spatialOffsets[key] = i;
             }
 
         }
-
+        
 
     }
 
-    void doubleDensityRelaxation(float dt, int start, int end){
+    std::vector<int> getNeighboorsSH(const glm::vec2& pointLocation) {
 
-        for(int i = start; i < end; i++)
-        {
-            glm::vec2& currentP = particlesLocations[i];
+        std::lock_guard<std::mutex> lock(neighborsMutex);
 
-            // Pressure
-            float P = pressureMultiplier * (particlesDensities[i] - targetDensity);
-            // Near Pressure
-            float Pnear =  pressureNearMultiplier * particlesNearDensities[i];
+        int ID = getID(pointLocation);
 
-            // Neighboor indexes in particlesLocations
-            std::vector<int>& neighboorIndexes = getNeighboors(currentP);
+        std::vector<int> out;
 
-            glm::vec2 dx = {0, 0};
+        for(int i = 0; i < 9; i++){
+            
+            int currCellKey = getCellKey(ID + neighbooringIDs[i]);
+            int startIndex = spatialOffsets[currCellKey];
 
-            for(int j = 0; j < neighboorIndexes.size(); j++)
-            {
-                glm::vec2& neighboor = particlesLocations[neighboorIndexes[j]];
-
-                float distance = glm::distance(currentP, neighboor);
-                glm::vec2 unit_R = currentP - neighboor;
-
-                float q = distance/m_smoothingRadius;
-
-                if ( q >= 1 || (unit_R.x == 0 && unit_R.y == 0)) continue;
-
-
-                unit_R = unit_R / glm::length(unit_R);
-                glm::vec2 D = (unit_R * (P * smoothingQuadraticSpikeDerivative(q) + Pnear * smoothingQuadraticSpike(q)) * dt * dt) ;
-
-                // // Velocity difference
-                // glm::vec2 u = unit_R * (velocities[i] - velocities[neighboorIndexes[j]]);
-
-                // if (u.x > 0 && u.y > 0){
-                //     glm::vec2 I =  unit_R * smoothingQuadraticSpikeDerivative(q) * (sigma * u + beta * u * u) * dt;
-                    
-                //     velocities[i] -= I/2.f;
-                //     velocities[neighboorIndexes[j]] += I/2.f;
-
-                // }
-
-                neighboor -= D/2.f;
-                dx += D/2.f;
-
+            for(int j = startIndex; j < plCount; j++){
+                if (spatialLookUp[j].x != currCellKey) break;
+                out.push_back(spatialLookUp[j].y);
             }
 
-            currentP += dx;
 
         }
 
+        return out;
+    } 
+
+    int getCellKeyPL(int particleIndex){
+        return (getID(particlesLocations[particleIndex]) * 1571) % plCount;
     }
 
-    void computeNextVelocity(float dt, int start, int end){
+    int getCellKey(int ID) {
+        return (ID * 1571) % plCount;
+    }
 
-        for(int i = start; i < end; i++)
-            velocities[i] = (particlesLocations[i] - particlesPrevLocations[i]) / dt;
+    static bool compareSpatialLookUp(glm::ivec2 i1, glm::ivec2 i2){
+        return i1.x < i2.x;
     }
 
 
@@ -598,6 +492,7 @@ public:
         dt = 0.05;
     
         updatePreviousLocations();
+        kappa();
         
         // COMPUTING LOCAL AND NEAR DENSITY
         for (int i = 0; i < totalThreads && workCount; i++){
@@ -607,13 +502,7 @@ public:
         }
         joinThreads(workCount);
         
-        // APPLYING VISCOCITY
-        // for (int i = 0; i < totalThreads && workCount; i++){
-        //     int start = i * workCount;
-        //     int end = (i == totalThreads - 1) ? plCount : workCount + start;
-        //     threads.emplace_back(&Solver::viscocityImpulse, this, dt, start, end);
-        // }
-        // joinThreads(workCount);
+
 
         // APPLYING PRESSURE
         for (int i = 0; i < totalThreads && workCount; i++){
@@ -648,15 +537,6 @@ public:
         particlesLocationBuffer.setData(particlesLocations.data(), particlesLocations.size() * sizeof(glm::vec2));
 
     }
-
-
-    void calculatePredictedPositionsParallel(float dt, int start, int end){
-
-        for (int i = 0; i < plCount; i++)
-            particlesPredictedLocations[i] = particlesLocations[i] + gravity * 0.05f;
-        
-    }
-
 
     void applyPressureParallel(float dt, int start, int end){
 
@@ -960,6 +840,11 @@ public:
         threads.clear();
 
     }
+
+    void toggleAttraction(bool flag, glm::vec2 mouseP){
+        isPressed = flag;
+        mousePos = mouseP;
+    }
     
     // ------------------------------------------------------------------------------- //
 
@@ -991,7 +876,7 @@ public:
         particlesNearDensities.resize(plCount);
         particlesPredictedLocations.resize(plCount);
 
-
+        // INITIALIZING GPU BUFFERS
         initilizePrevPos();
         computeShadersCalcuateNeighboors();
         std::vector<glm::vec2> initialVelocities(plCount, {0, 0});
@@ -1054,6 +939,9 @@ public:
         beta = b;
     }
 
+    void setAttraction(float a){
+        attraction = a;
+    }
     // ------------------------------------------------------------------------------- //
 
 
@@ -1210,6 +1098,10 @@ public:
 
     float getSmoothingRadius() const { 
         return m_smoothingRadius;
+    }
+
+    float getAttractionForce(){
+        return attraction;
     }
 
     float getSigma(){

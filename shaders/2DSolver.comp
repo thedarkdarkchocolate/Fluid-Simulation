@@ -71,12 +71,17 @@ uniform float gravity;
 uniform float sigma;
 uniform float beta;
 
+uniform float attraction;
+uniform bool isClicked;
+uniform vec2 mousePos;
+
 void getID();
 void calcDensity();
 void applyPressure();
-void applyPressureAll();
 void applyVelocities();
 void borderResolution();
+void calculateAttraction();
+void advanceToPredictedPositions();
 float smoothingQuadraticSpike(float q);
 float nearDensityKernel(float q);
 float smoothingQuadraticSpikeDerivative(float q);
@@ -98,10 +103,16 @@ void main(){
 
     barrier();
 
-    // if(currID >= 0)
-        applyPressure();
-    // else
-        // applyPressureAll();
+    // advanceToPredictedPositions();
+
+    // barrier();
+
+    applyPressure();
+
+    barrier();
+
+    if(isClicked)
+        calculateAttraction();
 
     barrier();
 
@@ -114,12 +125,6 @@ void main(){
 }
 
 
-// Notes from debugging
-// Looping over all particles yeilds different densities only for neighboors in the shader
-// cpu neighbooring calculation works fine 
-// also counting how many times q <= 1 to calculate density 
-// shows that only neighboors in gpu has a lower count of neighboors
-// and again cpu neighboors has exactly the same amount as looping all the particles
 void calcDensity() {
     
     densities[currIndex] = vec2(0);
@@ -167,6 +172,12 @@ void calcDensity() {
 
 }
 
+void advanceToPredictedPositions() {
+
+    particles[currIndex] += velocities[currIndex] * dt;
+
+}
+
 void applyPressure() {
     if (currID < 0) return;
 
@@ -200,20 +211,10 @@ void applyPressure() {
             vec2 I = unit_R * smoothingQuadraticSpikeDerivative(q) * (sigma * u + beta * u * u) * dt;
             du += I;
             
-            // velocities[neighboors[i]] += I/2.f;
+            velocities[neighboors[i]] += I/2.f;
 
         }
-
-        // Acquire lock for neighborIndex
-        // while (atomicExchange(locks[neighboors[i]], 1) == 1) {
-            // Busy-wait until lock is acquired
-        // }
-        // if (dist < 1){
-        //     particles[currIndex] += vec2(1, 1);
-        //     particles[neighboors[i]] -= vec2(1, 1);
-        // }
-        // Release lock for neighborIndex
-        // atomicExchange(locks[neighboors[i]], 0);
+        
 
         dx += D;
     }
@@ -223,60 +224,10 @@ void applyPressure() {
     pressure[currIndex].xy = dx;
 
     particles[currIndex] += dx;
-    velocities[currIndex] -= du;
+    velocities[currIndex] -= du/2;
 
 }
 
-void applyPressureAll(){
-
-    if (currID < 0) return;
-
-    vec2 dx = vec2(0);
-    vec2 du = vec2(0);
-
-    for (uint i = 0; i < plCount; i++){
-
-        vec2 neighboor = particlesPrev[i];
-
-        float dist = distance(particlesPrev[currIndex], neighboor);
-        vec2 unit_R = normalize(particlesPrev[currIndex] - neighboor);
-
-        float q = dist/smoothingRadius;
-
-        if ( q > 1 || unit_R == vec2(0)) continue;
-
-        vec2 D = vec2((P * smoothingQuadraticSpikeDerivative(q) + Pnear * smoothingQuadraticSpike(q)) * dt * dt) * unit_R;
-        atomicAdd(counter.y, 1);
-        // Velocity difference
-        vec2 u = unit_R * (velocitiesPrev[currIndex] - velocitiesPrev[i]);
-
-        if (u != vec2(0)){
-            vec2 I =  unit_R * smoothingQuadraticSpikeDerivative(q) * (sigma * u + beta * u * u) * dt;
-            du += I/2;
-            
-            velocities[currIndex] -= I/2.f;
-            velocities[i] += I/2.f;
-        
-        }   
-
-        // Acquire lock for neighborIndex
-        // while (atomicExchange(locks[neighboors[i]], 1) == 1) {
-        //     // Busy-wait until lock is acquired
-        // }
-
-        particles[i] -= D/2.f;
-
-        // // Release lock for neighborIndex
-        // atomicExchange(locks[neighboors[i]], 0);
-
-
-        dx += D/2.f;
-    }
-
-    pressure[currIndex].zw = dx;
-
-    particles[currIndex] += dx;
-}
 
 void applyVelocities(){
     velocities[currIndex] += vec2(0, gravity) * dt + particles[currIndex] - particlesPrev[currIndex];
@@ -311,11 +262,23 @@ void borderResolution(){
     }
 }
 
+void calculateAttraction(){
 
+    float dist = distance(particlesPrev[currIndex], mousePos);
+    vec2 unit_R = normalize(particlesPrev[currIndex] - mousePos);
+
+    float q = dist/smoothingRadius;
+
+    if(dist > 200) return;
+
+    velocities[currIndex] = attraction * -unit_R * smoothingQuadraticSpike(q);
+
+
+}
 
 void getID(){
     // For debugging
-    ID[currIndex] = int((gridNum.x * ceil((particles[currIndex].y - border.z)/smoothingRadius) - 1) + (ceil((particles[currIndex].x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
+    // ID[currIndex] = int((gridNum.x * ceil((particles[currIndex].y - border.z)/smoothingRadius) - 1) + (ceil((particles[currIndex].x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
     currID = int((gridNum.x * ceil((particles[currIndex].y - border.z)/smoothingRadius) - 1) + (ceil((particles[currIndex].x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
 }
 

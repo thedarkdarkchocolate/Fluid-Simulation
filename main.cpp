@@ -224,11 +224,8 @@ int main(){
         ImGui::NewFrame();
 
 
-        // if (changeSim)
-            // solver->Solve(deltaTime);
-        // else 
-        // solver->Solve(deltaTime, 1);
-        solver->ComputeShaderSolve(deltaTime, solver2D, neghboorSearch, writingToBuffer, dispatchCompute);
+        solver->Solve(deltaTime);
+        // solver->ComputeShaderSolve(deltaTime, solver2D, neghboorSearch, writingToBuffer, dispatchCompute);
             
         // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         
@@ -309,6 +306,7 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
     static float density = solver->getTargetDensity();
     static float sigma = solver->getSigma();
     static float beta = solver->getBeta();
+    static float attractionForce = solver->getAttractionForce();
 
     
     static bool gravityOn = true;
@@ -340,11 +338,11 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
         solver->setSmoothingRadius(smoothingRadius);
     }
 
-    if (ImGui::SliderFloat("Pressure constant", &pressure, 0.f, 120.f)){
+    if (ImGui::SliderFloat("Pressure constant", &pressure, 0.f, 300.f)){
         solver->setPressureMultiplier(pressure);
     }
 
-    if (ImGui::SliderFloat("Near Pressure constant", &nearPressure, 0.f, 120.f)){
+    if (ImGui::SliderFloat("Near Pressure constant", &nearPressure, 0.f, 300.f)){
         solver->setPressureNearMultiplier(nearPressure);
     }
 
@@ -360,8 +358,12 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
         solver->setSigma(sigma);
     }
 
-    if (ImGui::SliderFloat("Beta", &beta, 0.0000001f, 0.01f)){
+    if (ImGui::SliderFloat("Beta", &beta, 0.00001f, 0.01f)){
         solver->setBeta(beta);
+    }
+
+    if (ImGui::SliderFloat("Attraction Force", &attractionForce, 0.f, 400.f)){
+        solver->setAttraction(attractionForce);
     }
 
 
@@ -489,20 +491,11 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
     
-    if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS){
-        if (!isPressed){
-            densityCenterPnt = mousePos;
-            isPressed = true;
-        }
-        else {
-
-            smoothingRadius = glm::distance(densityCenterPnt, mousePos);
-            if (smoothingRadius <= 1) smoothingRadius = 1;
-
-            solver->setSmoothingRadius(smoothingRadius);
-            // sampleDensity = solver->calculateDensity(densityCenterPnt);
-        }
-
+    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS){
+        solver->toggleAttraction(true, mousePos);
+    }
+    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_1) == GLFW_RELEASE){
+        solver->toggleAttraction(false, mousePos);
     }
     if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_2) == GLFW_PRESS)
         isPressed = false;
