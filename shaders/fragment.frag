@@ -44,11 +44,12 @@ void main () {
     
     ivec2 indexBounds = ivec2(startEndIndexes[currID]);
 
-    for(int i = indexBounds.x; i < indexBounds.y; i++){
+    // for(int i = indexBounds.x; i < indexBounds.y; i++){
+    //     float dist = distance(gl_FragCoord.xy, particles[neighboors[i]].xy);
 
-    // for (int i = 0; i < particles.length(); i++){
+    for (int i = 0; i < particles.length(); i++){
+        float dist = distance(gl_FragCoord.xy, particles[i].xy);
 
-        float dist = distance(gl_FragCoord.xy, particles[neighboors[i]].xy);
 
         // Drawing solid particles
         if (dist <= 2) gl_FragColor = vec4(1.f);

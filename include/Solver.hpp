@@ -102,6 +102,12 @@ class Solver {
     glm::vec2 mousePos;
 
 public:
+    //Debuging Timers
+    float spatialHashGetNeigh = 0;
+    float dictionaryHashNeigh = 0;
+    int neighboorCounter = 0;
+
+
     
     Solver(){}
 
@@ -413,28 +419,25 @@ public:
     // -------------------------------------
 
 
-    void kappa(){
+    void initSpatialHash(){
 
         spatialLookUp.clear();
         spatialOffsets.clear();
         spatialLookUp.resize(plCount);
         spatialOffsets.resize(plCount);
 
-        for(int i = 0; i < plCount; i++){
-
-            spatialLookUp[i] = {getCellKey(i), i};
-
-        }
+        for(int i = 0; i < plCount; i++)
+            spatialLookUp[i] = {getCellKeyByIndex(i), i};
 
         std::sort(spatialLookUp.begin(), spatialLookUp.end(), &Solver::compareSpatialLookUp);
 
         for(int i = 0; i < plCount; i++){
         
-            // if(i == 0) 
             int key = spatialLookUp[i].x;
             int prevKey = (i == 0 ? plCount + 1 : spatialLookUp[i - 1].x);
 
             if (key != prevKey){
+
                 spatialOffsets[key] = i;
             }
 
@@ -443,13 +446,13 @@ public:
 
     }
 
-    std::vector<int> getNeighboorsSH(const glm::vec2& pointLocation) {
+    std::shared_ptr<std::vector<int>> getNeighboorsSH(const glm::vec2& pointLocation) {
 
         std::lock_guard<std::mutex> lock(neighborsMutex);
 
         int ID = getID(pointLocation);
 
-        std::vector<int> out;
+        std::shared_ptr<std::vector<int>> out = std::make_shared<std::vector<int>>();
 
         for(int i = 0; i < 9; i++){
             
@@ -458,7 +461,7 @@ public:
 
             for(int j = startIndex; j < plCount; j++){
                 if (spatialLookUp[j].x != currCellKey) break;
-                out.push_back(spatialLookUp[j].y);
+                out->push_back(spatialLookUp[j].y);
             }
 
 
@@ -467,7 +470,7 @@ public:
         return out;
     } 
 
-    int getCellKeyPL(int particleIndex){
+    int getCellKeyByIndex(int particleIndex){
         return (getID(particlesLocations[particleIndex]) * 1571) % plCount;
     }
 
@@ -488,11 +491,13 @@ public:
 
     void parrallel(float dt){
 
+        if(plCount == 0) return;
+
         const int workCount = (int)plCount > 100 ? plCount/totalThreads : 0;
         dt = 0.05;
     
         updatePreviousLocations();
-        kappa();
+        initSpatialHash();
         
         // COMPUTING LOCAL AND NEAR DENSITY
         for (int i = 0; i < totalThreads && workCount; i++){
@@ -608,9 +613,26 @@ public:
         // static int mass = 1;
         float distance = 0;
 
-        std::vector<int>& neighboors = getNeighboors(particlesLocations[i]);
+        neighboorCounter++;
+
+        auto start = std::chrono::high_resolution_clock::now();
+        ////////////
+        std::vector<int> neighboors = getNeighboors(particlesLocations[i]);
+        // getNeighboors(particlesLocations[i]);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        dictionaryHashNeigh += std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+
+        start = std::chrono::high_resolution_clock::now();
+        //////////////
+        // std::shared_ptr<std::vector<int>> neighboors = getNeighboorsSH(particlesLocations[i]);
+        getNeighboorsSH(particlesLocations[i]);
+        end = std::chrono::high_resolution_clock::now();
+        dictionaryHashNeigh += std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
         
-        for (auto& index: neighboors){
+        for (auto index: neighboors){
             distance = glm::distance(particlesLocations[i], particlesLocations[index]);    
             // Calculating local particle density
             density += smoothingQuadraticSpike(distance/m_smoothingRadius);
@@ -626,8 +648,9 @@ public:
         float distance = 0;
 
         std::vector<int>& neighboors = getNeighboors(particlesLocations[i]);
+        // std::shared_ptr<std::vector<int>> neighboors = getNeighboorsSH(particlesLocations[i]);
         
-        for (auto& index: neighboors){
+        for (auto index: neighboors){
             distance = glm::distance(particlesLocations[i], particlesLocations[index]);    
             // Calculating Near particle density
             density += nearDensityKernel(distance/m_smoothingRadius);
@@ -786,7 +809,9 @@ public:
 
         cacheParticles();
 
-        computeShadersCalcuateNeighboors();
+        // computeShadersCalcuateNeighboors();
+
+        initSpatialHash();
 
     }
 

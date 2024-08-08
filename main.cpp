@@ -286,6 +286,8 @@ int main(){
 
 
     std::cout << "Avg time elapsed, NeighboorSearch: " << neghboorSearch/count << std::endl;
+    printf("Avg time elapsed, retrieving Neighboors from Spatial Hash: %.4f\n", solver->spatialHashGetNeigh/solver->neighboorCounter);
+    printf("Avg time elapsed, retrieving Neighboors from Unordered Map: %.4f\n", solver->dictionaryHashNeigh/solver->neighboorCounter);
     printf("Avg time elapsed, Writing to buffers: %.4f\n", writingToBuffer);
     printf("Avg time elapsed, Compute dispatch:  %.4f\n", dispatchCompute);
 
