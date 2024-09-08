@@ -33,8 +33,9 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void changeBorderWidth(VertexArray& borderVao, Shader& shader);
 void changeBorderHeight(VertexArray& borderVao, Shader& shader);
 void updateBuffers(ShaderBuffer<glm::vec2>& particlesLocationBuffer);
+void populateArray(std::vector<int>& arr, int size);
 
-void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& borderS, Shader& exampleS, ComputeShader& compute);
+void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& borderS, ComputeShader& compute);
 
 
 static float vertices_wTexture[] = {
@@ -139,10 +140,13 @@ int main(){
     
     //Shader
     Shader renderS("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/vertex.vert", "C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/fragment.frag");
-    Shader exampleS("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/vertex.vert", "C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/exampleDensityFrag.frag");
     Shader borderS("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/vertexBorder.vert", "C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/fragmentBorder.frag");
     // ComputeShader solver2D_2 ("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/computeSolver2D_ver2.comp");
     ComputeShader solver2D("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/2DSolver.comp");
+
+    ComputeShader solver2D_test("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/2DSolver_test.comp");
+    ComputeShader GPUhashing("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/SpatialHash.comp");
+    ComputeShader GPUsort("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/GPUsort.comp");
 
     
 
@@ -169,11 +173,6 @@ int main(){
     borderS.useShader();
     borderS.setFloat("smoothingRadius", solver->getSmoothingRadius());
     
-    // EXAMPLE SHADER UNIFORMS
-    exampleS.useShader();
-    exampleS.setFloat("smoothingRadius", solver->getSmoothingRadius());
-    exampleS.setBool("toggle", false);
-    
     // Timing 
     float deltaTime = 0.0f; // time between current frame and last frame
     float lastFrame = 0.0f; // time of last frame
@@ -184,6 +183,48 @@ int main(){
     float writingToBuffer = 0;
     float dispatchCompute = 0;
     float count = 0;
+
+    // GPU sort Testing
+    // ShaderBuffer<int> toSort(12);
+    // std::vector<int> array;
+
+    // int size = 64;
+    // populateArray(array, size);
+    // toSort.setData(array.data(), array.size() * sizeof(int));
+
+
+    // GPUsort.useShader();
+    // GPUsort.setUint("plCount", size);
+   
+    // // int numStages = (int)std::log2(131072); // next pow of 2 over 100k
+    // int numStages = 6;
+
+    // for (int stageIndex = 0; stageIndex < numStages; stageIndex++)
+    // {
+    //     for (int stepIndex = 0; stepIndex < stageIndex + 1; stepIndex++)
+    //     {
+    //         // GPUsort.useShader();
+    //         // Calculate some pattern stuff
+    //         int groupWidth = 1 << (stageIndex - stepIndex);
+    //         int groupHeight = 2 * groupWidth - 1;
+    //         GPUsort.setInt("groupWidth", groupWidth);
+    //         GPUsort.setInt("groupHeight", groupHeight);
+    //         GPUsort.setInt("stepIndex", stepIndex);
+    //         // Run the sorting step on the GPU
+    //         glDispatchCompute(size, 1, 1);
+    //         glMemoryBarrier(GL_ALL_BARRIER_BITS);
+    //     }
+    // }
+
+    // toSort.getData(array, size);
+
+    // for(int i = 0; i < size - 1; i++)
+    //     if(!(array[i] <= array[i+1])){
+    //         std::cout << "List sort was unsuccesfully" << std::endl;
+    //         break;
+    //     }
+    // std::cout << "List sorted succesfully" << std::endl;
+
 
     // Render Loop
     while(!glfwWindowShouldClose(window)){
@@ -224,8 +265,9 @@ int main(){
         ImGui::NewFrame();
 
 
-        solver->Solve(deltaTime);
+        // solver->Solve(deltaTime);
         // solver->ComputeShaderSolve(deltaTime, solver2D, neghboorSearch, writingToBuffer, dispatchCompute);
+        solver->ComputeShaderSolveGpuSort(deltaTime, solver2D_test, GPUsort, GPUhashing, neghboorSearch, writingToBuffer, dispatchCompute);
             
         // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         
@@ -271,7 +313,7 @@ int main(){
         // glPolygonMode(GL_FRONT, GL_LINE);
         // glPolygonMode(GL_BACK, GL_LINE);
 
-        imguiMenu(deltaTime, borderVAO, renderS, borderS, exampleS, solver2D);
+        imguiMenu(deltaTime, borderVAO, renderS, borderS, solver2D);
         // imguiTestMenu(deltaTime, borderVAO, particlesLocationBuffer, , renderS, exampleS, computeS);
         
         ImGui::Render();
@@ -285,18 +327,18 @@ int main(){
     }
 
 
-    std::cout << "Avg time elapsed, NeighboorSearch: " << neghboorSearch/count << std::endl;
-    printf("Avg time elapsed, retrieving Neighboors from Spatial Hash: %.4f\n", solver->spatialHashGetNeigh/solver->neighboorCounter);
-    printf("Avg time elapsed, retrieving Neighboors from Unordered Map: %.4f\n", solver->dictionaryHashNeigh/solver->neighboorCounter);
-    printf("Avg time elapsed, Writing to buffers: %.4f\n", writingToBuffer);
-    printf("Avg time elapsed, Compute dispatch:  %.4f\n", dispatchCompute);
+    // std::cout << "Avg time elapsed, NeighboorSearch: " << neghboorSearch/count << std::endl;
+    // printf("Avg time elapsed, retrieving Neighboors from Spatial Hash: %.4f\n", solver->spatialHashGetNeigh);
+    // printf("Avg time elapsed, retrieving Neighboors from Unordered Map: %.4f\n", solver->dictionaryHashNeigh);
+    // printf("Avg time elapsed, Writing to buffers: %.4f\n", writingToBuffer);
+    // printf("Avg time elapsed, Compute dispatch:  %.4f\n", dispatchCompute);
 
     glfwTerminate();
     
     return EXIT_SUCCESS;
 }
 
-void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& shaderB,  Shader& exampleS, ComputeShader& compute){
+void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& shaderB, ComputeShader& compute){
 
     // Number of particles to add 
     static int v = 1000;
@@ -360,7 +402,7 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
         solver->setSigma(sigma);
     }
 
-    if (ImGui::SliderFloat("Beta", &beta, 0.00001f, 0.01f)){
+    if (ImGui::SliderFloat("Beta", &beta, 0.00001f, 0.05f)){
         solver->setBeta(beta);
     }
 
@@ -561,4 +603,16 @@ void changeBorderHeight(VertexArray& borderVao, Shader& shader){
         
         // Sending change to solver
         solver->setBorder(borderPixelCoords);
+}
+
+
+void populateArray(std::vector<int>& arr, int size){
+
+    arr.resize(size);
+    std::random_device rd("1");
+    std::uniform_int_distribution<int> dist(0, 100);
+
+    for(int i = 0; i < size; i++){
+        arr[i] = dist(rd);
+    }
 }

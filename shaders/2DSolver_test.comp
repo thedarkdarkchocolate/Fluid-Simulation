@@ -6,14 +6,6 @@ layout(std430, binding = 0) buffer particlesLocations {
     vec2 particles[];
 };
 
-layout(std430, binding = 1) readonly buffer neighboorsByCellID {
-    uint neighboors[];
-};
-
-layout(std430, binding = 2) readonly buffer startEndIndexes {
-    uvec2 indexes[];
-};
-
 layout(std430, binding = 3) buffer particlesVelocities {
     vec2 velocities[];
 };
@@ -26,29 +18,14 @@ layout(std430, binding = 4) buffer particlesPrevPos {
     vec2 particlesPrev[];
 };
 
-layout(std430, binding = 5) buffer debugDensities {
-    vec2 densities[];
+layout(std430, binding = 10) buffer spatialLookUpTable {
+    ivec2 spatialLookUp[];
 };
 
-layout(std430, binding = 6) buffer debugCounter {
-    uvec2 counter;
+layout(std430, binding = 11) buffer spatialOffsetTable {
+    uint spatialOffsets[];
 };
 
-layout(std430, binding = 7) buffer debugID {
-    int ID[];
-};
-
-layout(std430, binding = 9) buffer debugPressure {
-    vec4 pressure[];
-};
-
-layout(std430, binding = 10) buffer debugLocks {
-    int locks[];
-};
-
-layout(std430, binding = 11) buffer spatialIndicesBuffer {
-    uint spatialIndices[];
-};
 
 uint currIndex;
 int currID;
@@ -59,6 +36,7 @@ highp float Pnear;
 vec2 currParticle;
 
 uniform uint plCount;
+uniform int neighbooringIDs[9];
 uniform vec4 border;
 uniform ivec2 gridNum;
 uniform float dt;
@@ -82,6 +60,7 @@ void applyVelocities();
 void borderResolution();
 void calculateAttraction();
 void advanceToPredictedPositions();
+int getCellKey(int ID);
 float smoothingQuadraticSpike(float q);
 float nearDensityKernel(float q);
 float smoothingQuadraticSpikeDerivative(float q);
@@ -122,27 +101,36 @@ void main(){
 
     borderResolution();   
 
+    spatialLookUp[currIndex] = ivec2(0);
+    spatialOffsets[currIndex] = 0;
+
 }
 
 
 void calcDensity() {
     
-    densities[currIndex] = vec2(0);
-    counter = uvec2(0);
     if (currID >= 0){
 
-        uvec2 bounds = indexes[currID];
-        for(uint i = bounds.x; i < bounds.y; i++){
-            highp float dist = distance(particles[currIndex], particles[neighboors[i]]); 
+        for(int j = 0; j < 9; j++){
 
-            float q = dist/smoothingRadius;
+            int currCellKey = getCellKey(currID + neighbooringIDs[j]);
+            uint startIndex = spatialOffsets[currCellKey];
+            
+            for(uint i = startIndex; i < plCount && spatialLookUp[i].x == currCellKey; i++){
 
-            if (q > 1) continue;
+                int neighboorIndex = spatialLookUp[i].y;
 
-            density += smoothingQuadraticSpike(q);
-            nearDensity += nearDensityKernel(q);
-        }
+                highp float dist = distance(particles[currIndex], particles[neighboorIndex]); 
 
+                float q = dist/smoothingRadius;
+
+                if (q > 1) continue;
+
+                density += smoothingQuadraticSpike(q);
+                nearDensity += nearDensityKernel(q);
+            
+
+        }   }
     }
     else
         for(uint i = 0; i < plCount; i++){
@@ -172,44 +160,53 @@ void advanceToPredictedPositions() {
 }
 
 void applyPressure() {
+    
     if (currID < 0) return;
 
     vec2 dx = vec2(0);
     vec2 du = vec2(0);
     
-    uvec2 bounds = indexes[currID];
-    
-    for (uint i = bounds.x; i < bounds.y; i++){
+    for(int j = 0; j < 9; j++){
 
-        vec2 neighboor = particlesPrev[neighboors[i]];
-
-        float dist = distance(particlesPrev[currIndex], neighboor);
-        vec2 unit_R = normalize(particlesPrev[currIndex] - neighboor);
-
-        float q = dist/smoothingRadius;
-
-        if ( q > 1 || unit_R == vec2(0)) continue;
-
-        vec2 D = vec2((P * smoothingQuadraticSpikeDerivative(q) + Pnear * smoothingQuadraticSpike(q)) * dt * dt) * unit_R;
-
+        int currCellKey = getCellKey(currID + neighbooringIDs[j]);
+        uint startIndex = spatialOffsets[currCellKey];
         
-        // Velocity difference
-        vec2 u = unit_R * (velocitiesPrev[currIndex] - velocitiesPrev[neighboors[i]]);
+        for(uint i = startIndex; i < plCount && spatialLookUp[i].x == currCellKey; i++){
 
-        if (u != vec2(0)){
-            vec2 I = unit_R * smoothingQuadraticSpikeDerivative(q) * (sigma * u + beta * u * u) * dt;
-            du += I;
+            int neighboorIndex = spatialLookUp[i].y;
+
+            vec2 neighboor = particlesPrev[neighboorIndex];
+            float dist = distance(particlesPrev[currIndex], neighboor);
+            vec2 unit_R = normalize(particlesPrev[currIndex] - neighboor);
+
+            float q = dist/smoothingRadius;
+
+
+            if ( q >= 1 || unit_R == vec2(0)) continue;
+
+            vec2 D = vec2((P * smoothingQuadraticSpikeDerivative(q) + Pnear * smoothingQuadraticSpike(q)) * dt * dt) * unit_R;
+
+            if (particles[currIndex] == neighboor){
+                velocitiesPrev[neighboorIndex] -= D;
+            }
             
-            // Max Force
-            float maxForce = 0.01 * smoothingRadius / dt; // Adjust this value as needed
-            I = clamp(I, -maxForce, maxForce);
-            velocities[neighboors[i]] += I/2.f;
+            // Velocity difference
+            vec2 u = unit_R * (velocitiesPrev[currIndex] - velocitiesPrev[neighboorIndex]);
 
-        }
-        
+            if (u != vec2(0)){
+                vec2 I = unit_R * smoothingQuadraticSpikeDerivative(q) * (sigma * u + beta * u * u / nearPressMult) * dt;
+                du += I;
+                
+                // // Max Force
+                // float maxForce = 0.01 * smoothingRadius / dt; // Adjust this value as needed
+                // I = clamp(I, -maxForce, maxForce);
+                velocities[neighboorIndex] += I/2.f;
 
-        dx += D;
-    }
+            }
+            
+            dx += D;
+
+    }   }
 
     barrier();
 
@@ -270,6 +267,10 @@ void getID(){
     // For debugging
     // ID[currIndex] = int((gridNum.x * ceil((particles[currIndex].y - border.z)/smoothingRadius) - 1) + (ceil((particles[currIndex].x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
     currID = int((gridNum.x * ceil((particles[currIndex].y - border.z)/smoothingRadius) - 1) + (ceil((particles[currIndex].x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
+}
+
+int getCellKey(int ID){
+    return int((ID * 7919) % plCount);
 }
 
 float smoothingQuadraticSpike(float q){

@@ -1,67 +1,45 @@
 #version 430
 
-layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 layout(std430, binding = 0) buffer particlesLocations {
     vec2 particles[];
 };
 
-layout(std430, binding = 1) buffer spatialLookupBuffer {
-    uint spatialLookup[];
+layout(std430, binding = 10) buffer spatialLookUpTable {
+    ivec2 spatialLookUp[];
 };
-
-layout(std430, binding = 2) buffer spatialIndicesBuffer {
-    uint spatialIndices[];
-};
-
-// Constants used for hashing
-const uint hashK1 = 15823;
-const uint hashK2 = 9737333;
-uint currIndex;
 
 uniform uint plCount;
+uniform vec4 border;
+uniform ivec2 gridNum;
 uniform float smoothingRadius;
 
-const ivec2 offsets[9] =
-{
-	ivec2(-1, 1),
-	ivec2(0, 1),
-	ivec2(1, 1),
-	ivec2(-1, 0),
-	ivec2(0, 0),
-	ivec2(1, 0),
-	ivec2(-1, -1),
-	ivec2(0, -1),
-	ivec2(1, -1),
-};
+uint currIndex;
+uint currID;
 
-ivec2 GetCell2D(vec2 position)
-{
-	return ivec2((floor(position / smoothingRadius)));
-}
-
-uint HashCell2D(vec2 cell)
-{
-	uint a = uint(cell.x * hashK1);
-	uint b = uint(cell.y * hashK2);
-	return (a + b);
-}
-
-uint IDFromHash(uint hash)
-{
-	return hash % plCount;
-}
+void getID();
+int getCellKey();
+void hashElement();
 
 void main(){
 
     currIndex = gl_GlobalInvocationID.x;
 
-    if (currIndex >= plCount) return;
+    getID();
 
-    ivec2 cell = GetCell2D(particles[currIndex]);
-    uint hash = HashCell2D(cell);
-	uint ID = KeyFromHash(hash);
-	spatialIndices[currIndex] = uvec2(currIndex, hash, ID);
+    hashElement();
 
+}
 
+void hashElement(){
+    spatialLookUp[currIndex] = ivec2(getCellKey(), currIndex);
+}
+
+int getCellKey(){
+    return int((currID * 7919) % plCount);
+}
+
+void getID(){
+    currID = int((gridNum.x * ceil((particles[currIndex].y - border.z)/smoothingRadius) - 1) + (ceil((particles[currIndex].x - border.x)/smoothingRadius) - 1) - gridNum.x + 1);
 }

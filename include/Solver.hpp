@@ -37,8 +37,8 @@ class Solver {
     ShaderBuffer<glm::uvec2> debugBufferCounter;
     ShaderBuffer<glm::vec4> debugPressure;
     ShaderBuffer<int> debugID;
-    ShaderBuffer<int> spatialLookupBuffer;
-    ShaderBuffer<int> spatialIndexessBuffer;
+    ShaderBuffer<glm::ivec2> spatialLookupBuffer;
+    ShaderBuffer<int> spatialOffsetsBuffer;
     
     // Holding previous iteration locations to calculate the velocity
     std::vector<glm::vec2> particlesPrevLocations;
@@ -88,6 +88,7 @@ class Solver {
 
     // Mutex for synchronizing access to getNeighboors
     mutable std::mutex neighborsMutex;
+    mutable std::mutex densityMutex;
 
     //Particles Radius
     float particlesRadius = 10.f;
@@ -125,7 +126,7 @@ public:
       bufferPrevVelocities(8),
       debugPressure(9),
       spatialLookupBuffer(10),
-      spatialIndexessBuffer(11)
+      spatialOffsetsBuffer(11)
 
     {
         particlesLocations = {};
@@ -182,8 +183,7 @@ public:
         computeShadersCalcuateNeighboors();
 
         auto end = std::chrono::high_resolution_clock::now();
-        neighboorsTiming += std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-
+        neighboorsTiming = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
         // Set buffers with new neighbors
         // glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
         
@@ -222,7 +222,7 @@ public:
 
 
         //     // call glDispatchCompute here
-        //     glDispatchCompute(plCount, 1, 1);
+        //     glDispatchCompute(plCount/64 + plCount%64, 1, 1);
 
 
         //     // End the query
@@ -247,7 +247,7 @@ public:
         //     glDeleteQueries(1, &query);
         // }
         // Call compute Shader
-        glDispatchCompute(plCount, 1, 1);
+        glDispatchCompute(plCount/64 + plCount%64, 1, 1);
         // compareIDs();
         // compareDensities();
         // compareDensityRelaxations();
@@ -260,6 +260,137 @@ public:
 
     
         // End of compute
+    }
+
+    void ComputeShaderSolveGpuSort(float dt, ComputeShader& s_compute, ComputeShader& s_gpuSort, ComputeShader& s_spatialHash, float& neighboorsTiming, float& writeBuffersTiming, float& computeTiming){
+
+        dt = 0.03;
+        if(plCount == 0) return;
+
+
+        // Retriving particles Locations for testing
+        // particlesLocationBuffer.getData(particlesLocations, plCount);
+
+        // Populating Hash Table
+        s_spatialHash.useShader();
+        s_spatialHash.setUint("plCount", plCount);
+        s_spatialHash.setVec4fv("border", {m_borderW, m_borderH});
+        s_spatialHash.setVec2iv("gridNum", gridNum);
+        s_spatialHash.setFloat("smoothingRadius", m_smoothingRadius);
+
+        glDispatchCompute(plCount/64 + plCount%64, 1, 1);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+        // Sorting Hash Table and Writing offsets
+        // gpuSort(s_gpuSort);
+
+        // ----------- //
+
+        // initSpatialHash();
+
+        std::vector<glm::ivec2> gpuSpatialHashArray;
+        gpuSpatialHashArray.resize(plCount);
+        spatialLookupBuffer.getData(gpuSpatialHashArray, plCount);
+
+        std::sort(gpuSpatialHashArray.begin(), gpuSpatialHashArray.end(), &Solver::compareSpatialLookUp);
+
+        spatialLookupBuffer.setData(gpuSpatialHashArray.data(), plCount * sizeof(glm::ivec2));
+
+        s_gpuSort.useShader();
+        s_gpuSort.setUint("plCount", plCount);
+        s_gpuSort.setBool("setOffsets", true);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+        glDispatchCompute(plCount/64 + plCount%64, 1, 1);
+
+
+        std::vector<int> gpuSpatialHashOffArray;
+        gpuSpatialHashOffArray.resize(plCount);
+        spatialOffsetsBuffer.getData(gpuSpatialHashOffArray, plCount);
+
+        // for(int i = 0; i < plCount; i++){
+            // if(gpuSpatialHashOffArray[i] != spatialOffsets[i])
+            // {
+            //     std::cout << "Offset arrays mismatch, index: " << i << std::endl;
+            // } 
+            // if(gpuSpatialHashArray[i].x != spatialLookUp[i].x)
+            // {
+            //     std::cout << "Lookup arrays mismatch, index: " << i << std::endl;
+            // } 
+        // }
+        
+        // for(int i = 0; i < plCount; i++){
+        //     if(gpuSpatialHashArray[i].x != spatialLookUp[i].x)
+        //     {
+        //         std::cout << "Lookup arrays mismatch, index: " << i << std::endl;
+        //     } 
+        // }
+        // std::cout << "#################"<< std::endl;
+
+
+        // ----------- //
+
+        // Set Uniforms
+        s_compute.useShader();
+        s_compute.setUint("plCount", plCount);
+        s_compute.setVec4fv("border", {m_borderW, m_borderH});
+        s_compute.setVec2iv("gridNum", gridNum);
+        s_compute.setIntArray("neighbooringIDs", neighbooringIDs, 9);
+        s_compute.setFloat("dt", dt);
+        s_compute.setFloat("targetDensity", targetDensity);
+        s_compute.setFloat("pressMult", pressureMultiplier);
+        s_compute.setFloat("nearPressMult", pressureNearMultiplier);
+        s_compute.setFloat("smoothingRadius", m_smoothingRadius);
+        s_compute.setFloat("gravity", gravity.y);
+        s_compute.setFloat("sigma", sigma);
+        s_compute.setFloat("beta", beta);
+        s_compute.setFloat("attraction", attraction);
+        s_compute.setBool("isClicked", isPressed);
+        s_compute.setVec2fv("mousePos", mousePos);
+
+        glDispatchCompute(plCount/64 + plCount%64, 1, 1);
+
+    
+    }
+
+    void gpuSort(ComputeShader& gpuSort){
+
+        gpuSort.useShader();
+        gpuSort.setUint("plCount", plCount);
+        gpuSort.setBool("setOffsets", false);
+   
+        int numStages = (int)std::log2(nextPowOf_2(plCount));
+
+        for (int stageIndex = 0; stageIndex < numStages; stageIndex++)
+        {
+            for (int stepIndex = 0; stepIndex < stageIndex + 1; stepIndex++)
+            {
+
+                // Calculate some pattern stuff
+                int groupWidth = 1 << (stageIndex - stepIndex);
+                int groupHeight = 2 * groupWidth - 1;
+                gpuSort.setInt("groupWidth", groupWidth);
+                gpuSort.setInt("groupHeight", groupHeight);
+                gpuSort.setInt("stepIndex", stepIndex);
+                // Run the sorting step on the GPU
+                glDispatchCompute((plCount/64 + plCount%64)/2, 1, 1);
+                glMemoryBarrier(GL_ALL_BARRIER_BITS);
+            }
+
+            // TODO::add uniform to calculate offsets 
+            if (stageIndex == numStages - 1){
+                gpuSort.setBool("setOffsets", true);
+                glDispatchCompute(plCount/64 + plCount%64, 1, 1);
+            }
+
+        }
+    }
+
+    int nextPowOf_2(int value){
+        
+        for(int i = 0; i < 30; i++)
+            if (pow(2, i) > value)
+                return pow(2, i);
+
     }
 
     void compareDensityRelaxations(){
@@ -446,13 +577,11 @@ public:
 
     }
 
-    std::shared_ptr<std::vector<int>> getNeighboorsSH(const glm::vec2& pointLocation) {
+    void getNeighboorsSH(const glm::vec2& pointLocation, std::vector<int>& out) {
 
         std::lock_guard<std::mutex> lock(neighborsMutex);
 
         int ID = getID(pointLocation);
-
-        std::shared_ptr<std::vector<int>> out = std::make_shared<std::vector<int>>();
 
         for(int i = 0; i < 9; i++){
             
@@ -461,21 +590,19 @@ public:
 
             for(int j = startIndex; j < plCount; j++){
                 if (spatialLookUp[j].x != currCellKey) break;
-                out->push_back(spatialLookUp[j].y);
+                out.push_back(spatialLookUp[j].y);
             }
-
-
         }
 
-        return out;
+
     } 
 
     int getCellKeyByIndex(int particleIndex){
-        return (getID(particlesLocations[particleIndex]) * 1571) % plCount;
+        return (getID(particlesLocations[particleIndex]) * 7919) % plCount;
     }
 
     int getCellKey(int ID) {
-        return (ID * 1571) % plCount;
+        return (ID * 7919) % plCount;
     }
 
     static bool compareSpatialLookUp(glm::ivec2 i1, glm::ivec2 i2){
@@ -577,16 +704,12 @@ public:
                     
                     velocities[i] -= I/2.f;
 
-                    // neighborsMutex.lock();
                     velocities[neighboorIndexes[j]] += I/2.f;
-                    // neighborsMutex.unlock();
 
                 }
 
 
-                // neighborsMutex.lock();
                 particlesLocations[neighboorIndexes[j]] -= D/2.f;
-                // neighborsMutex.unlock();
                 dx += D/2.f;
             }
 
@@ -613,7 +736,7 @@ public:
         // static int mass = 1;
         float distance = 0;
 
-        neighboorCounter++;
+        neighboorCounter = 1;
 
         auto start = std::chrono::high_resolution_clock::now();
         ////////////
@@ -627,9 +750,10 @@ public:
         start = std::chrono::high_resolution_clock::now();
         //////////////
         // std::shared_ptr<std::vector<int>> neighboors = getNeighboorsSH(particlesLocations[i]);
-        getNeighboorsSH(particlesLocations[i]);
+        std::vector<int> out;
+        getNeighboorsSH(particlesLocations[i], out);
         end = std::chrono::high_resolution_clock::now();
-        dictionaryHashNeigh += std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        spatialHashGetNeigh += std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
         
         for (auto index: neighboors){
@@ -910,16 +1034,18 @@ public:
         bufferPrevVelocities.setData(initialVelocities.data(), plCount * sizeof(glm::vec2));
         bufferPrevPositions.setData(IN_particlesLocations.data(), plCount * sizeof(glm::vec2));
         bufferDensities.setData(initialVelocities.data(), plCount * sizeof(glm::vec2));
-        debugPressure.setData(initialVelocities.data(), plCount * sizeof(glm::vec4));
+        // debugPressure.setData(initialVelocities.data(), plCount * sizeof(glm::vec4));
 
 
         glm::ivec2 tmp {0, 0};
-        debugBufferCounter.setData(&tmp, sizeof(glm::ivec2));
+        // debugBufferCounter.setData(&tmp, sizeof(glm::ivec2));
+
+        std::vector<glm::ivec2> a (plCount, tmp);
+        spatialLookupBuffer.setData(a.data(), plCount * sizeof(glm::ivec2));
 
         std::vector<int> b (plCount, 0);
-        spatialLookupBuffer.setData(b.data(), plCount * sizeof(int));
-        spatialIndexessBuffer.setData(b.data(), plCount * sizeof(int));
-        debugID.setData(b.data(), plCount * sizeof(int));
+        spatialOffsetsBuffer.setData(b.data(), plCount * sizeof(int));
+        // debugID.setData(b.data(), plCount * sizeof(int));
 
     }
 
