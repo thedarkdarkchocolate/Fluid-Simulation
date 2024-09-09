@@ -70,6 +70,7 @@
         "stop_token": "cpp",
         "thread": "cpp",
         "mutex": "cpp",
-        "glsllint.glslangValidatorPath": "C:\\Users\\thedarkchoco\\glsLangValidators\\glslang-master-windows-Debug\\bin\\glslang"
+        "glsllint.glslangValidatorPath": "C:\\Users\\thedarkchoco\\glsLangValidators\\glslang-master-windows-Debug\\bin\\glslang",
+        "filesystem": "cpp"
     }
 }

@@ -6,10 +6,10 @@
 #include <thread>
 
 #include "glad/glad.h"
-#include <GLFW/glfw3.h>
+#include <glfw3.h>
 
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
+#include "glm/glm.hpp"
+#include "glm/gtc/matrix_transform.hpp"
 
 #include <imgui.h>
 #include "imgui_impl_glfw.h"
@@ -25,6 +25,17 @@
 #include "ShaderBuffer.hpp"
 #include "Solver.hpp"
 
+#include <filesystem>
+
+#ifdef _WIN32
+    #include <windows.h>
+#elif __linux__
+    #include <unistd.h>
+#elif __APPLE__
+    #include <mach-o/dyld.h>
+#endif
+
+
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int heigth);
 void processInput(GLFWwindow* window);
@@ -34,6 +45,8 @@ void changeBorderWidth(VertexArray& borderVao, Shader& shader);
 void changeBorderHeight(VertexArray& borderVao, Shader& shader);
 void updateBuffers(ShaderBuffer<glm::vec2>& particlesLocationBuffer);
 void populateArray(std::vector<int>& arr, int size);
+std::string getExecutablePath();
+std::string getProjectRootPath();
 
 void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& borderS, ComputeShader& compute);
 
@@ -110,6 +123,7 @@ int main(){
     glfwMakeContextCurrent(window);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_UNAVAILABLE);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
     // Uncapped FPS
     glfwSwapInterval(60);
 
@@ -133,20 +147,28 @@ int main(){
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
+
     // Init imgui for OpenGL
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 430");
 
-    
-    //Shader
-    Shader renderS("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/vertex.vert", "C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/fragment.frag");
-    Shader borderS("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/vertexBorder.vert", "C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/fragmentBorder.frag");
-    // ComputeShader solver2D_2 ("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/computeSolver2D_ver2.comp");
-    ComputeShader solver2D("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/2DSolver.comp");
 
-    ComputeShader solver2D_test("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/2DSolver_test.comp");
-    ComputeShader GPUhashing("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/SpatialHash.comp");
-    ComputeShader GPUsort("C:/Users/thedarkchoco/Desktop/vscode/Fluid-Simulation/shaders/GPUsort.comp");
+    // Retriving Relative Paths
+    std::string projectRoot = getProjectRootPath();
+    std::cout << "Project Root Path: " << projectRoot << std::endl;
+
+    std::string shaderDir = projectRoot + "/shaders";
+    std::cout << "Shader Directory: " << shaderDir << std::endl;
+
+    // Shaders
+    Shader renderS                  ((shaderDir + "/vertex.vert").c_str()       , (shaderDir + "/fragment.frag").c_str());
+    Shader borderS                  ((shaderDir + "/vertexBorder.vert").c_str() , (shaderDir + "/fragmentBorder.frag").c_str());
+
+    // Compute Shaders
+    ComputeShader solver2D          ((shaderDir + "/2DSolver.comp").c_str());
+    ComputeShader solver2D_test     ((shaderDir + "/2DSolver_test.comp").c_str());
+    ComputeShader GPUhashing        ((shaderDir + "/SpatialHash.comp").c_str());
+    ComputeShader GPUsort           ((shaderDir + "/GPUsort.comp").c_str());
 
     
 
@@ -266,18 +288,10 @@ int main(){
 
 
         // solver->Solve(deltaTime);
-        // solver->ComputeShaderSolve(deltaTime, solver2D, neghboorSearch, writingToBuffer, dispatchCompute);
-        solver->ComputeShaderSolveGpuSort(deltaTime, solver2D_test, GPUsort, GPUhashing, neghboorSearch, writingToBuffer, dispatchCompute);
+        solver->ComputeShaderSolve(deltaTime, solver2D, neghboorSearch, writingToBuffer, dispatchCompute);
+        // solver->ComputeShaderSolveGpuSort(deltaTime, solver2D_test, GPUsort, GPUhashing, neghboorSearch, writingToBuffer, dispatchCompute);
             
-        // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        
 
-        // ---------- Compute Shader ----------
-        // computeS.useShader();
-        // computeS.setFloat("deltaTime", deltaTime);
-        // glDispatchCompute(1, 1, 1);
-        // glMemoryBarrier(GL_ALL_BARRIER_BITS);
-        // --------------------------------------
 
         // ---------- Render particles ----------
         renderS.useShader();
@@ -289,15 +303,6 @@ int main(){
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         VAO.Unbind();
-        // --------------------------------------
-
-
-        // ---------- Example Render ----------
-        // exampleS.useShader();
-        // exampleS.setFloat("smoothingRadius", solver->getSmoothingRadius());
-        // VAO.Bind();
-        // glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        // VAO.Unbind();
         // --------------------------------------
 
     
@@ -326,13 +331,6 @@ int main(){
         glfwPollEvents();
     }
 
-
-    // std::cout << "Avg time elapsed, NeighboorSearch: " << neghboorSearch/count << std::endl;
-    // printf("Avg time elapsed, retrieving Neighboors from Spatial Hash: %.4f\n", solver->spatialHashGetNeigh);
-    // printf("Avg time elapsed, retrieving Neighboors from Unordered Map: %.4f\n", solver->dictionaryHashNeigh);
-    // printf("Avg time elapsed, Writing to buffers: %.4f\n", writingToBuffer);
-    // printf("Avg time elapsed, Compute dispatch:  %.4f\n", dispatchCompute);
-
     glfwTerminate();
     
     return EXIT_SUCCESS;
@@ -356,12 +354,17 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
     static bool gravityOn = true;
     static float g = abs(solver->getGravity().y);
 
+    ImVec2 defaultWindowSize(200.0f, 400.0f);
+    ImGui::SetWindowSize(defaultWindowSize, ImGuiCond_FirstUseEver);
+
     //ImGui
     ImGui::Begin("Fluid Simulation");
     ImGui::Text("FPS: %1.f", 1/deltaTime);
     ImGui::Text("Density: %.5f", sampleDensity);
     ImGui::Text("mouseX: %1.f, mouseY: %1.f", mousePos.x, mousePos.y);
     
+    ImGui::PushItemWidth(120.0f);
+
     if (ImGui::SliderFloat("Border Width", W_H, 0, WIDTH, "%.1f")){
         changeBorderWidth(borderVao, render);
     }
@@ -406,14 +409,14 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
         solver->setBeta(beta);
     }
 
-    if (ImGui::SliderFloat("Attraction Force", &attractionForce, 0.f, 400.f)){
+    if (ImGui::SliderFloat("Attraction Force", &attractionForce, 0.f, 50.f)){
         solver->setAttraction(attractionForce);
     }
 
 
     ImGui::Text("--------------------");
 
-    ImGui::SliderInt("Particles to spawn", &v, 0, 50000);
+    ImGui::SliderInt("Particles to spawn", &v, 0, 5000);
 
     if (ImGui::Button("Random Location Spawn"))
     {
@@ -435,41 +438,6 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
         auto end = std::chrono::high_resolution_clock::now();
         std::cout << "Set particles time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << std::endl;
     }   
-
-    ImGui::Text("--------------------");
-
-    // ImGui::SliderInt("Particles to spawn", &particlesTadd, 0, 200, "%d", 1);
-    
-
-    if (ImGui::SliderFloat("Spacing", &spacing, 0, 50) || ImGui::Button("Spawn Particles")){
-
-        std::vector<glm::vec2> pl;
-        pl.resize(particlesTadd);
-
-        int rowCount = sqrt(particlesTadd);
-        float startWidth = (borderPixelCoords[1] - borderPixelCoords[0])/2 - ((rowCount - 1) * spacing)/2;
-        float startHeight = (borderPixelCoords[3] - borderPixelCoords[2])/2 - (rowCount * spacing)/2;
-
-        for(int i = 0; i < particlesTadd; i++){
-            if (i != 0 && i%rowCount == 0)
-                startHeight += spacing;
-            pl[i].x = startWidth + ((i%rowCount) * spacing) + borderPixelCoords[0];
-            pl[i].y = startHeight + borderPixelCoords[2];
-        }
-
-
-        solver->setParticlesLocation(pl);
-
-    }
-
-    ImGui::Text("--------------------");
-    static float loc[2] = {0, 0};
-
-    ImGui::InputFloat2("Location to check", loc);
-
-    if (ImGui::Button("Get Spawn ID")){
-        std::cout << solver->getID({loc[0], loc[1]}) << std::endl;
-    }
 
     ImGui::Text("--------------------");
 
@@ -615,4 +583,43 @@ void populateArray(std::vector<int>& arr, int size){
     for(int i = 0; i < size; i++){
         arr[i] = dist(rd);
     }
+}
+
+std::string getExecutablePath() {
+    char buffer[1024];
+    std::string execPath;
+
+#ifdef _WIN32
+    // For Windows
+    GetModuleFileNameA(NULL, buffer, sizeof(buffer));
+    execPath = std::string(buffer);
+#elif __linux__
+    // For Linux
+    ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    if (len != -1) {
+        buffer[len] = '\0';
+        execPath = std::string(buffer);
+    }
+#elif __APPLE__
+    // For macOS
+    uint32_t size = sizeof(buffer);
+    if (_NSGetExecutablePath(buffer, &size) == 0) {
+        execPath = std::string(buffer);
+    }
+#endif
+
+    return execPath;
+}
+
+std::string getProjectRootPath() {
+    std::string execPath = getExecutablePath();
+
+    // Use filesystem to get the directory path and navigate to the project folder
+    std::filesystem::path execDir = std::filesystem::path(execPath).parent_path();
+
+    // Assuming the executable is inside 'build/' or a similar directory
+    // and the project root is one level above
+    std::filesystem::path projectRoot = execDir.parent_path().parent_path();  // Adjust accordingly
+
+    return projectRoot.string();
 }

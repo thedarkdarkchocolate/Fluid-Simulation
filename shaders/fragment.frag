@@ -36,7 +36,7 @@ void getID() {
 // Array of 16 colors for smoother transitions
 vec3 getColorFromVelocity(vec2 velocity) {
     float speed = length(velocity);
-    float maxSpeed = 10.0; // Adjust based on max speed in the simulation
+    float maxSpeed = 20.0; // Adjust based on max speed in the simulation
     float t = clamp(speed / maxSpeed, 0.0, 1.0);
 
     vec3 colorPalette[16] = vec3[](

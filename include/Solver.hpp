@@ -19,9 +19,11 @@ class Solver {
     // Particle Locations
     std::vector<glm::vec2> particlesLocations;  
     std::vector<glm::vec2> particlesPredictedLocations;  
+
     // Size in bytes of the vector holding all particle locations
     unsigned int plSize;
     unsigned int plCount;
+
     // Spatial Lookup
     std::vector<glm::ivec2> spatialLookUp;
     std::vector<int> spatialOffsets;
@@ -166,24 +168,16 @@ public:
 
     void ComputeShaderSolve(float dt, ComputeShader& compute, float& neighboorsTiming, float& writeBuffersTiming, float& computeTiming){
 
-        dt = 0.03;
+        // dt = 0.03;
         if(plCount == 0) return;
-        // Ensure GPU writes to particlesLocationBuffer are visible to the CPU
-        // glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
         
         // Retrieve new locations from GPU to calculate neighbors on CPU
         particlesLocationBuffer.getData(particlesLocations, plCount);
 
-        // Ensure CPU reads are complete
-        // glMemoryBarrier(GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
-
-        auto start = std::chrono::high_resolution_clock::now();
-        
         // Calculate Neighbors for compute on CPU
         computeShadersCalcuateNeighboors();
 
         auto end = std::chrono::high_resolution_clock::now();
-        neighboorsTiming = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
         // Set buffers with new neighbors
         // glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
         
@@ -264,7 +258,7 @@ public:
 
     void ComputeShaderSolveGpuSort(float dt, ComputeShader& s_compute, ComputeShader& s_gpuSort, ComputeShader& s_spatialHash, float& neighboorsTiming, float& writeBuffersTiming, float& computeTiming){
 
-        dt = 0.03;
+        // dt = 0.01;
         if(plCount == 0) return;
 
 
@@ -949,19 +943,6 @@ public:
             pointGridDict[getID(particlesLocations[i])].push_back(i);
         }
 
-    }
-
-    void cachePredictedParticles(){
-        pointGridDict.clear();
-        IDGridDict.clear();
-        
-        
-        for (int i = 0; i < plCount; i++){
-
-            // int ID = getID(particlesLocations[i]);
-            pointGridDict[getID(particlesPredictedLocations[i])].push_back(i);
-            // std::cout << ID << std::endl;
-        }
     }
 
     void initilizePrevPos(){

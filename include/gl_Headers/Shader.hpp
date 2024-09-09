@@ -1,6 +1,8 @@
 #pragma once 
+
 #include <glad/glad.h>
-#include <glm/gtc/type_ptr.hpp>
+#include <glm\gtc\type_ptr.hpp>
+
 
 #include <string>
 #include <fstream>
@@ -18,7 +20,7 @@ class Shader {
     public:
     // constructor reads and builds the shader program
     Shader(const char * vertexPath, const char* fragmentPath);
-    Shader(const char* computePath);
+    Shader(const std::string vertexPath, const std::string fragmentPath);
 
     // Copy constuctor
     // Shader(Shader& shader) = delete;
