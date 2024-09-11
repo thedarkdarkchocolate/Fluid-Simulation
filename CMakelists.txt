@@ -6,6 +6,8 @@ project(${PROJECT_NAME} VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
+set(CMAKE_BUILD_TYPE Release)
+
 # Set the source files
 file(GLOB_RECURSE SRC_FILES src/*.cpp)
 add_executable(${PROJECT_NAME} main.cpp ${SRC_FILES})
@@ -37,6 +39,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE glm)
 if (UNIX)
    target_link_libraries(${PROJECT_NAME} pthread)
 endif (UNIX)
+
+# Custom command to copy glfw3.dll after build (Release mode)
+if (WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/third_party/GLFW/glfw3.dll"  # Path to the glfw3.dll
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>")  # Output directory of the executable
+endif()
 
 # Configure CPack (for packaging)
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
