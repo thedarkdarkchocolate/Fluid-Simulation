@@ -15,9 +15,8 @@ In this project I familiarized myself with fluid simulation and optimization tec
 
 
 
-### Build Instructions
-<br>
-You will need to install **CMake**
+### Build Instructions <br>
+#### You will need to install **CMake**
 
 ```bash
 git clone https://github.com/thedarkdarkchocolate/Fluid-Simulation.git
