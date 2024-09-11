@@ -159,10 +159,7 @@ int main(){
 
     // Retriving Relative Paths
     std::string projectRoot = getProjectRootPath();
-    std::cout << "Project Root Path: " << projectRoot << std::endl;
-
     std::string shaderDir = projectRoot + "/shaders";
-    std::cout << "Shader Directory: " << shaderDir << std::endl;
 
     // Shaders
     Shader renderS                  ((shaderDir + "/vertex.vert").c_str()       , (shaderDir + "/fragment.frag").c_str());
