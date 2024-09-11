@@ -18,17 +18,17 @@ target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/third_party/glad)
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/third_party)
 
-# ImGui - Include and Link
+# ImGui
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/third_party/imgui/include)
 target_link_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/third_party/imgui/lib)
 target_link_libraries(${PROJECT_NAME} PRIVATE imgui)  # imgui library in lib folder
 
-# GLFW - Include and Link
+# GLFW 
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/third_party/GLFW/include)
 target_link_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/third_party/GLFW/lib)
 target_link_libraries(${PROJECT_NAME} PRIVATE glfw)
 
-# GLM - Header-only library, no need for linking
+# GLM 
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/third_party/glm/include)
 target_link_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/third_party/glm/lib)
 target_link_libraries(${PROJECT_NAME} PRIVATE glm)

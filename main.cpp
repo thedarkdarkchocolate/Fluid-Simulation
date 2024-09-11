@@ -175,7 +175,7 @@ int main(){
     ComputeShader GPUsort           ((shaderDir + "/GPUsort.comp").c_str());
 
     
-
+    
     VertexArray VAO;
     VertexBuffer VBO(vertices_wTexture, sizeof(vertices_wTexture));
     VAO.addLayout(GL_FLOAT, 3, false);
@@ -211,6 +211,7 @@ int main(){
     float count = 0;
 
     // GPU sort Testing
+
     // ShaderBuffer<int> toSort(12);
     // std::vector<int> array;
 
@@ -343,7 +344,7 @@ int main(){
 void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& shaderB, ComputeShader& compute){
 
     // Number of particles to add 
-    static int v = 1000;
+    static int v = 3000;
     static float p_to_Add[2] = {0, 0};
     static float spacing = 20;
     static int particlesTadd = 400;
@@ -353,6 +354,7 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
     static float sigma = solver->getSigma();
     static float beta = solver->getBeta();
     static float attractionForce = solver->getAttractionForce();
+    smoothingRadius = solver->getSmoothingRadius();
 
     
     static bool gravityOn = true;
@@ -401,19 +403,19 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
         solver->setTargetDensity(density);
     }
 
-    if (ImGui::SliderFloat("Gravity", &g, 0.f, 20.f)){
+    if (ImGui::SliderFloat("Gravity", &g, 0.f, 30.f)){
         solver->setGravity({0.0f, -g});
     }
 
-    if (ImGui::SliderFloat("Sigma", &sigma, 0.f, 4.f)){
+    if (ImGui::SliderFloat("Sigma - (Viscocity)", &sigma, 0.f, 4.f)){
         solver->setSigma(sigma);
     }
 
-    if (ImGui::SliderFloat("Beta", &beta, 0.00001f, 0.05f)){
+    if (ImGui::SliderFloat("Beta", &beta, 0.001f, 0.015f)){
         solver->setBeta(beta);
     }
 
-    if (ImGui::SliderFloat("Attraction Force", &attractionForce, 0.f, 50.f)){
+    if (ImGui::SliderFloat("Mouse Force", &attractionForce, 0.f, 50.f)){
         solver->setAttraction(attractionForce);
     }
 
@@ -472,9 +474,6 @@ void imguiMenu(float deltaTime, VertexArray& borderVao, Shader& render, Shader& 
         solver->clearParticles();
     }
 
-    if (ImGui::Button("Change Sim")){
-        changeSim = !changeSim;
-    }
 
     ImGui::End();
 }

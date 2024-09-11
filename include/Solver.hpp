@@ -115,7 +115,7 @@ public:
     Solver(){}
 
     // No particles constuctor
-    Solver(float border[4], float smoothingRadius = 100.f, glm::vec2 initVel = {0, 0}, float pressureMult = 42, float pressureNearMulti = 63, float atrctForce = 43.f)
+    Solver(float border[4], float smoothingRadius = 90.f, glm::vec2 initVel = {0, 0}, float pressureMult = 150, float pressureNearMulti = 70, float atrctForce = 15.f)
     : m_smoothingRadius {smoothingRadius},
       particlesLocationBuffer(0),
       bufferIndexesByCellID(1),
@@ -146,10 +146,10 @@ public:
         pressureMultiplier = pressureMult;
         pressureNearMultiplier = pressureNearMulti;
         attraction = atrctForce;
-        targetDensity = 20;
-        gravity = {0, -20.f};
-        sigma = 0.01f;
-        beta = 0.0001f;
+        targetDensity = 35;
+        gravity = {0, -25.f};
+        sigma = 0.02f;
+        beta = 0.005f;
         isPressed = false;
         mousePos = {0, 0};
 
@@ -272,8 +272,8 @@ public:
         s_spatialHash.setVec2iv("gridNum", gridNum);
         s_spatialHash.setFloat("smoothingRadius", m_smoothingRadius);
 
-        glDispatchCompute(plCount/64 + plCount%64, 1, 1);
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
+        glDispatchCompute(plCount/64 + plCount%64, 1, 1);
 
         // Sorting Hash Table and Writing offsets
         // gpuSort(s_gpuSort);
@@ -289,6 +289,7 @@ public:
         std::sort(gpuSpatialHashArray.begin(), gpuSpatialHashArray.end(), &Solver::compareSpatialLookUp);
 
         spatialLookupBuffer.setData(gpuSpatialHashArray.data(), plCount * sizeof(glm::ivec2));
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
         s_gpuSort.useShader();
         s_gpuSort.setUint("plCount", plCount);
@@ -297,9 +298,9 @@ public:
         glDispatchCompute(plCount/64 + plCount%64, 1, 1);
 
 
-        std::vector<int> gpuSpatialHashOffArray;
-        gpuSpatialHashOffArray.resize(plCount);
-        spatialOffsetsBuffer.getData(gpuSpatialHashOffArray, plCount);
+        // std::vector<int> gpuSpatialHashOffArray;
+        // gpuSpatialHashOffArray.resize(plCount);
+        // spatialOffsetsBuffer.getData(gpuSpatialHashOffArray, plCount);
 
         // for(int i = 0; i < plCount; i++){
             // if(gpuSpatialHashOffArray[i] != spatialOffsets[i])
@@ -341,6 +342,7 @@ public:
         s_compute.setBool("isClicked", isPressed);
         s_compute.setVec2fv("mousePos", mousePos);
 
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
         glDispatchCompute(plCount/64 + plCount%64, 1, 1);
 
     

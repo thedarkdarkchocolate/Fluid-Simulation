@@ -226,7 +226,7 @@ void applyVelocities(){
 
 void borderResolution(){
 
-    float collisionDamping = 0.6;
+    float collisionDamping = 0.7;
     float borderFriction = 0;
 
     if(particles[currIndex].x < border.x){
