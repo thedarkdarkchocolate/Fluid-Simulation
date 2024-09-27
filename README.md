@@ -9,7 +9,7 @@ In this project I familiarized myself with fluid simulation and optimization tec
     * Fluid Variables
 * Mouse interaction
 # Media
-| Video: OpenGL Fluid Sim |
+| [Video: OpenGL Fluid Sim](https://www.youtube.com/watch?v=o_MiktU0-7I) |
 |:-:|
 |[![Image1](images/image.png)](https://youtu.be/o_MiktU0-7I)
 
